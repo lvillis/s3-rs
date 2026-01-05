@@ -4,6 +4,8 @@ use std::time::Duration;
 pub(crate) mod async_transport;
 #[cfg(feature = "blocking")]
 pub(crate) mod blocking_transport;
+#[cfg(feature = "rustls")]
+pub(crate) mod tls;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RetryConfig {

@@ -38,6 +38,7 @@ http = { version = "1.4.0", default-features = false, features = ["std"] }
 metrics = { version = "0.24.3", default-features = false }
 quick-xml = { version = "0.38.4", default-features = false, features = ["serialize"] }
 reqwest = { version = "0.13.1", default-features = false, features = ["stream"] }
+rustls = { version = "0.23.35", default-features = false, features = ["std", "tls12", "ring"] }
 serde = { version = "1.0.228", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0.148", default-features = false, features = ["std"] }
 sha1 = { version = "0.10.6", default-features = false, features = ["std"] }
@@ -67,6 +68,7 @@ futures-util = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
 quick-xml = { workspace = true }
 reqwest = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
@@ -95,7 +97,12 @@ credentials-imds = ["dep:serde_json"]
 credentials-sts = []
 
 # TLS selection
-rustls = ["reqwest?/rustls-no-provider", "ureq?/rustls-no-provider", "ureq?/platform-verifier"]
+rustls = [
+    "dep:rustls",
+    "reqwest?/rustls-no-provider",
+    "ureq?/rustls-no-provider",
+    "ureq?/platform-verifier",
+]
 native-tls = ["reqwest?/native-tls", "ureq?/native-tls"]
 
 # Optional escape hatch

@@ -44,6 +44,9 @@ impl AsyncTransport {
         user_agent: Option<String>,
         timeout: Option<Duration>,
     ) -> Result<Self> {
+        #[cfg(feature = "rustls")]
+        crate::transport::tls::ensure_rustls_crypto_provider();
+
         let mut builder = reqwest::Client::builder();
         if let Some(timeout) = timeout {
             builder = builder.timeout(timeout);

@@ -43,6 +43,9 @@ impl BlockingTransport {
         user_agent: Option<String>,
         timeout: Option<Duration>,
     ) -> Result<Self> {
+        #[cfg(feature = "rustls")]
+        crate::transport::tls::ensure_rustls_crypto_provider();
+
         Ok(Self {
             agent: ureq::agent(),
             retry,
