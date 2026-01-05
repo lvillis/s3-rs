@@ -11,6 +11,15 @@ categories = ["api-bindings", "web-programming::http-client"]
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"
+include = [
+  "Cargo.toml",
+  "README.md",
+  "LICENSE",
+  "CHANGELOG.md",
+  "src/**",
+  "examples/**",
+  "tests/**"
+]
 
 [workspace]
 members = ["."]
