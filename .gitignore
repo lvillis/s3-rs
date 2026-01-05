@@ -1,0 +1,77 @@
+# Build
+/target
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.o
+*.d
+*.rlib
+*.rmeta
+
+# Docs
+/target/doc
+
+# Project docs
+docs/
+
+# Cache
+.cargo/
+!.cargo/
+.cargo/*
+!.cargo/config.toml
+!.cargo/*.cmd
+
+# Coverage
+coverage/
+*.profraw
+*.profdata
+*.gcno
+*.gcda
+
+# IDE
+.vscode/
+.idea/
+*.iml
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Local databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# WASM
+pkg/
+*.wasm
+
+# Node
+node_modules/
+
+# Library crates may ignore Cargo.lock
+Cargo.lock
+
+.aiignore
+CONTEXT.md
+.justfile
+
+dist/
+
+.bak/
+
+crates/aptower/logs/
+
+# proptest
+proptest-regressions/
+AGENTS.md
