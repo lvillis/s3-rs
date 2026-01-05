@@ -34,6 +34,14 @@ jobs:
             args: >-
               --no-default-features
               --features blocking,rustls,multipart,checksums,credentials-profile,credentials-imds,credentials-sts,tracing,metrics
+          - name: async-all-native-tls
+            args: >-
+              --no-default-features
+              --features async,native-tls,multipart,checksums,credentials-profile,credentials-imds,credentials-sts,tracing,metrics
+          - name: blocking-all-native-tls
+            args: >-
+              --no-default-features
+              --features blocking,native-tls,multipart,checksums,credentials-profile,credentials-imds,credentials-sts,tracing,metrics
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -41,6 +49,9 @@ jobs:
           toolchain: 1.92.0
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install OpenSSL (native-tls)
+        if: contains(matrix.name, 'native-tls')
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
       - run: cargo clippy --all-targets ${{ matrix.args }} -- -D warnings
 
   test:
@@ -61,12 +72,23 @@ jobs:
             args: >-
               --no-default-features
               --features blocking,rustls,multipart,checksums,credentials-profile,credentials-imds,credentials-sts,tracing,metrics
+          - name: async-all-native-tls
+            args: >-
+              --no-default-features
+              --features async,native-tls,multipart,checksums,credentials-profile,credentials-imds,credentials-sts,tracing,metrics
+          - name: blocking-all-native-tls
+            args: >-
+              --no-default-features
+              --features blocking,native-tls,multipart,checksums,credentials-profile,credentials-imds,credentials-sts,tracing,metrics
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.92.0
       - uses: Swatinem/rust-cache@v2
+      - name: Install OpenSSL (native-tls)
+        if: contains(matrix.name, 'native-tls')
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
       - run: cargo test ${{ matrix.args }}
 
   minio-integration:

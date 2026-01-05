@@ -385,9 +385,11 @@ impl GetObjectRequest {
             return Err(response_error(resp).await);
         }
 
-        let etag = header_string(&resp, http::header::ETAG);
-        let content_length = header_u64(&resp, http::header::CONTENT_LENGTH);
-        let content_type = header_string(&resp, http::header::CONTENT_TYPE);
+        let etag = crate::util::headers::header_string(resp.headers(), http::header::ETAG);
+        let content_length =
+            crate::util::headers::header_u64(resp.headers(), http::header::CONTENT_LENGTH);
+        let content_type =
+            crate::util::headers::header_string(resp.headers(), http::header::CONTENT_TYPE);
 
         let stream = resp.bytes_stream().map(|item| match item {
             Ok(b) => Ok(b),
@@ -428,9 +430,15 @@ impl HeadObjectRequest {
         }
 
         Ok(HeadObjectOutput {
-            etag: header_string(&resp, http::header::ETAG),
-            content_length: header_u64(&resp, http::header::CONTENT_LENGTH),
-            content_type: header_string(&resp, http::header::CONTENT_TYPE),
+            etag: crate::util::headers::header_string(resp.headers(), http::header::ETAG),
+            content_length: crate::util::headers::header_u64(
+                resp.headers(),
+                http::header::CONTENT_LENGTH,
+            ),
+            content_type: crate::util::headers::header_string(
+                resp.headers(),
+                http::header::CONTENT_TYPE,
+            ),
         })
     }
 }
@@ -568,7 +576,7 @@ impl PutObjectRequest {
         }
 
         Ok(PutObjectOutput {
-            etag: header_string(&resp, http::header::ETAG),
+            etag: crate::util::headers::header_string(resp.headers(), http::header::ETAG),
         })
     }
 }
@@ -712,7 +720,7 @@ impl CopyObjectRequest {
     pub async fn send(self) -> Result<CopyObjectOutput> {
         let mut headers = HeaderMap::new();
 
-        let copy_source = copy_source_header_value(
+        let copy_source = crate::util::headers::copy_source_header_value(
             &self.source_bucket,
             &self.source_key,
             self.source_version_id.as_deref(),
@@ -878,7 +886,7 @@ impl UploadPartRequest {
         }
 
         Ok(UploadPartOutput {
-            etag: header_string(&resp, http::header::ETAG),
+            etag: crate::util::headers::header_string(resp.headers(), http::header::ETAG),
         })
     }
 }
@@ -911,7 +919,7 @@ impl UploadPartCopyRequest {
     pub async fn send(self) -> Result<UploadPartCopyOutput> {
         let mut headers = HeaderMap::new();
 
-        let copy_source = copy_source_header_value(
+        let copy_source = crate::util::headers::copy_source_header_value(
             &self.source_bucket,
             &self.source_key,
             self.source_version_id.as_deref(),
@@ -1462,31 +1470,4 @@ impl PresignDeleteObjectRequest {
             self.headers,
         )
     }
-}
-
-fn header_string(resp: &reqwest::Response, name: http::header::HeaderName) -> Option<String> {
-    resp.headers()
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.to_string())
-}
-
-fn copy_source_header_value(bucket: &str, key: &str, version_id: Option<&str>) -> String {
-    let bucket_enc = crate::util::encode::aws_percent_encode(bucket);
-    let key_enc = crate::util::encode::aws_percent_encode_path(key);
-
-    match version_id {
-        Some(v) => {
-            let version_enc = crate::util::encode::aws_percent_encode(v);
-            format!("/{bucket_enc}/{key_enc}?versionId={version_enc}")
-        }
-        None => format!("/{bucket_enc}/{key_enc}"),
-    }
-}
-
-fn header_u64(resp: &reqwest::Response, name: http::header::HeaderName) -> Option<u64> {
-    resp.headers()
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
 }

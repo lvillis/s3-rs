@@ -1,7 +1,7 @@
-use std::io::Read as _;
-
 use bytes::Bytes;
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
+
+use super::blocking_common::read_body_string;
 
 use crate::{
     client::BlockingClient,
@@ -284,7 +284,7 @@ impl BlockingHeadBucketRequest {
         }
 
         Ok(HeadBucketOutput {
-            region: header_string(&resp, "x-amz-bucket-region"),
+            region: crate::util::headers::header_string(resp.headers(), "x-amz-bucket-region"),
         })
     }
 }
@@ -891,26 +891,6 @@ impl BlockingDeleteBucketPublicAccessBlockRequest {
         let body = read_body_string(body)?;
         Err(response_error(parts.status, &parts.headers, &body))
     }
-}
-
-fn header_string(resp: &ureq::http::Response<ureq::Body>, name: &str) -> Option<String> {
-    resp.headers()
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.to_string())
-}
-
-fn read_body_bytes(body: ureq::Body) -> Result<Vec<u8>> {
-    let mut out = Vec::new();
-    body.into_reader()
-        .read_to_end(&mut out)
-        .map_err(|e| Error::transport("failed to read response body", Some(Box::new(e))))?;
-    Ok(out)
-}
-
-fn read_body_string(body: ureq::Body) -> Result<String> {
-    let bytes = read_body_bytes(body)?;
-    Ok(String::from_utf8_lossy(&bytes).to_string())
 }
 
 pub struct BlockingGetBucketConfigRawRequest {

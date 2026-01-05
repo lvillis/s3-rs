@@ -1,7 +1,9 @@
-use std::{io::Read as _, time::Duration};
+use std::time::Duration;
 
 use bytes::Bytes;
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
+
+use super::blocking_common::read_body_string;
 
 use crate::{
     client::BlockingClient,
@@ -395,13 +397,15 @@ impl BlockingGetObjectRequest {
 
         if !resp.status().is_success() {
             let (parts, body) = resp.into_parts();
-            let body = read_body_string_from_body(body)?;
+            let body = read_body_string(body)?;
             return Err(response_error(parts.status, &parts.headers, &body));
         }
 
-        let etag = header_string(&resp, http::header::ETAG);
-        let content_length = header_u64(&resp, http::header::CONTENT_LENGTH);
-        let content_type = header_string(&resp, http::header::CONTENT_TYPE);
+        let etag = crate::util::headers::header_string(resp.headers(), http::header::ETAG);
+        let content_length =
+            crate::util::headers::header_u64(resp.headers(), http::header::CONTENT_LENGTH);
+        let content_type =
+            crate::util::headers::header_string(resp.headers(), http::header::CONTENT_TYPE);
 
         Ok(BlockingGetObjectOutput {
             body: BlockingByteStream::new(resp.into_body().into_reader()),
@@ -431,14 +435,20 @@ impl BlockingHeadObjectRequest {
 
         if !resp.status().is_success() {
             let (parts, body) = resp.into_parts();
-            let body = read_body_string_from_body(body)?;
+            let body = read_body_string(body)?;
             return Err(response_error(parts.status, &parts.headers, &body));
         }
 
         Ok(HeadObjectOutput {
-            etag: header_string(&resp, http::header::ETAG),
-            content_length: header_u64(&resp, http::header::CONTENT_LENGTH),
-            content_type: header_string(&resp, http::header::CONTENT_TYPE),
+            etag: crate::util::headers::header_string(resp.headers(), http::header::ETAG),
+            content_length: crate::util::headers::header_u64(
+                resp.headers(),
+                http::header::CONTENT_LENGTH,
+            ),
+            content_type: crate::util::headers::header_string(
+                resp.headers(),
+                http::header::CONTENT_TYPE,
+            ),
         })
     }
 }
@@ -562,12 +572,12 @@ impl BlockingPutObjectRequest {
 
         if !resp.status().is_success() {
             let (parts, body) = resp.into_parts();
-            let body = read_body_string_from_body(body)?;
+            let body = read_body_string(body)?;
             return Err(response_error(parts.status, &parts.headers, &body));
         }
 
         Ok(PutObjectOutput {
-            etag: header_string(&resp, http::header::ETAG),
+            etag: crate::util::headers::header_string(resp.headers(), http::header::ETAG),
         })
     }
 }
@@ -595,7 +605,7 @@ impl BlockingDeleteObjectRequest {
         }
 
         let (parts, body) = resp.into_parts();
-        let body = read_body_string_from_body(body)?;
+        let body = read_body_string(body)?;
         Err(response_error(parts.status, &parts.headers, &body))
     }
 }
@@ -662,12 +672,12 @@ impl BlockingDeleteObjectsRequest {
 
         if !resp.status().is_success() {
             let (parts, body) = resp.into_parts();
-            let body = read_body_string_from_body(body)?;
+            let body = read_body_string(body)?;
             return Err(response_error(parts.status, &parts.headers, &body));
         }
 
         let (_, body) = resp.into_parts();
-        let xml = read_body_string_from_body(body)?;
+        let xml = read_body_string(body)?;
         crate::util::xml::parse_delete_objects(&xml)
     }
 }
@@ -708,7 +718,7 @@ impl BlockingCopyObjectRequest {
     pub fn send(self) -> Result<CopyObjectOutput> {
         let mut headers = HeaderMap::new();
 
-        let copy_source = copy_source_header_value(
+        let copy_source = crate::util::headers::copy_source_header_value(
             &self.source_bucket,
             &self.source_key,
             self.source_version_id.as_deref(),
@@ -748,12 +758,12 @@ impl BlockingCopyObjectRequest {
 
         if !resp.status().is_success() {
             let (parts, body) = resp.into_parts();
-            let body = read_body_string_from_body(body)?;
+            let body = read_body_string(body)?;
             return Err(response_error(parts.status, &parts.headers, &body));
         }
 
         let (_, body) = resp.into_parts();
-        let xml = read_body_string_from_body(body)?;
+        let xml = read_body_string(body)?;
         crate::util::xml::parse_copy_object(&xml)
     }
 }
@@ -810,12 +820,12 @@ impl BlockingCreateMultipartUploadRequest {
 
         if !resp.status().is_success() {
             let (parts, body) = resp.into_parts();
-            let body = read_body_string_from_body(body)?;
+            let body = read_body_string(body)?;
             return Err(response_error(parts.status, &parts.headers, &body));
         }
 
         let (_, body) = resp.into_parts();
-        let xml = read_body_string_from_body(body)?;
+        let xml = read_body_string(body)?;
         crate::util::xml::parse_create_multipart_upload(&xml)
     }
 }
@@ -861,12 +871,12 @@ impl BlockingUploadPartRequest {
 
         if !resp.status().is_success() {
             let (parts, body) = resp.into_parts();
-            let body = read_body_string_from_body(body)?;
+            let body = read_body_string(body)?;
             return Err(response_error(parts.status, &parts.headers, &body));
         }
 
         Ok(UploadPartOutput {
-            etag: header_string(&resp, http::header::ETAG),
+            etag: crate::util::headers::header_string(resp.headers(), http::header::ETAG),
         })
     }
 }
@@ -899,7 +909,7 @@ impl BlockingUploadPartCopyRequest {
     pub fn send(self) -> Result<UploadPartCopyOutput> {
         let mut headers = HeaderMap::new();
 
-        let copy_source = copy_source_header_value(
+        let copy_source = crate::util::headers::copy_source_header_value(
             &self.source_bucket,
             &self.source_key,
             self.source_version_id.as_deref(),
@@ -930,12 +940,12 @@ impl BlockingUploadPartCopyRequest {
 
         if !resp.status().is_success() {
             let (parts, body) = resp.into_parts();
-            let body = read_body_string_from_body(body)?;
+            let body = read_body_string(body)?;
             return Err(response_error(parts.status, &parts.headers, &body));
         }
 
         let (_, body) = resp.into_parts();
-        let xml = read_body_string_from_body(body)?;
+        let xml = read_body_string(body)?;
         crate::util::xml::parse_upload_part_copy(&xml)
     }
 }
@@ -986,12 +996,12 @@ impl BlockingCompleteMultipartUploadRequest {
 
         if !resp.status().is_success() {
             let (parts, body) = resp.into_parts();
-            let body = read_body_string_from_body(body)?;
+            let body = read_body_string(body)?;
             return Err(response_error(parts.status, &parts.headers, &body));
         }
 
         let (_, body) = resp.into_parts();
-        let xml = read_body_string_from_body(body)?;
+        let xml = read_body_string(body)?;
         crate::util::xml::parse_complete_multipart_upload(&xml)
     }
 }
@@ -1021,7 +1031,7 @@ impl BlockingAbortMultipartUploadRequest {
         }
 
         let (parts, body) = resp.into_parts();
-        let body = read_body_string_from_body(body)?;
+        let body = read_body_string(body)?;
         Err(response_error(parts.status, &parts.headers, &body))
     }
 }
@@ -1068,12 +1078,12 @@ impl BlockingListPartsRequest {
 
         if !resp.status().is_success() {
             let (parts, body) = resp.into_parts();
-            let body = read_body_string_from_body(body)?;
+            let body = read_body_string(body)?;
             return Err(response_error(parts.status, &parts.headers, &body));
         }
 
         let (_, body) = resp.into_parts();
-        let xml = read_body_string_from_body(body)?;
+        let xml = read_body_string(body)?;
         crate::util::xml::parse_list_parts(&xml)
     }
 }
@@ -1157,12 +1167,12 @@ impl BlockingListObjectsV2Request {
 
         if !resp.status().is_success() {
             let (parts, body) = resp.into_parts();
-            let body = read_body_string_from_body(body)?;
+            let body = read_body_string(body)?;
             return Err(response_error(parts.status, &parts.headers, &body));
         }
 
         let (_, body) = resp.into_parts();
-        let xml = read_body_string_from_body(body)?;
+        let xml = read_body_string(body)?;
         crate::util::xml::parse_list_objects_v2(&xml)
     }
 }
@@ -1445,50 +1455,4 @@ impl BlockingPresignDeleteObjectRequest {
             self.headers,
         )
     }
-}
-
-fn header_string(
-    resp: &ureq::http::Response<ureq::Body>,
-    name: http::header::HeaderName,
-) -> Option<String> {
-    resp.headers()
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.to_string())
-}
-
-fn header_u64(
-    resp: &ureq::http::Response<ureq::Body>,
-    name: http::header::HeaderName,
-) -> Option<u64> {
-    resp.headers()
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
-}
-
-fn copy_source_header_value(bucket: &str, key: &str, version_id: Option<&str>) -> String {
-    let bucket_enc = crate::util::encode::aws_percent_encode(bucket);
-    let key_enc = crate::util::encode::aws_percent_encode_path(key);
-
-    match version_id {
-        Some(v) => {
-            let version_enc = crate::util::encode::aws_percent_encode(v);
-            format!("/{bucket_enc}/{key_enc}?versionId={version_enc}")
-        }
-        None => format!("/{bucket_enc}/{key_enc}"),
-    }
-}
-
-fn read_body_bytes(body: ureq::Body) -> Result<Vec<u8>> {
-    let mut out = Vec::new();
-    body.into_reader()
-        .read_to_end(&mut out)
-        .map_err(|e| Error::transport("failed to read response body", Some(Box::new(e))))?;
-    Ok(out)
-}
-
-fn read_body_string_from_body(body: ureq::Body) -> Result<String> {
-    let bytes = read_body_bytes(body)?;
-    Ok(String::from_utf8_lossy(&bytes).to_string())
 }

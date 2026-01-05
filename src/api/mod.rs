@@ -1,6 +1,8 @@
 #[cfg(feature = "blocking")]
 mod blocking_buckets;
 #[cfg(feature = "blocking")]
+mod blocking_common;
+#[cfg(feature = "blocking")]
 mod blocking_objects;
 #[cfg(feature = "async")]
 mod buckets;

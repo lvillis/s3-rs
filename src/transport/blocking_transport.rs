@@ -91,7 +91,7 @@ impl BlockingTransport {
                 .clone_for_retry()
                 .ok_or_else(|| Error::transport("request body is not replayable", None))?;
 
-            let resp = match method.as_str() {
+            let result = match method.as_str() {
                 "GET" => {
                     ensure_empty_body(&current_body)?;
                     let req = apply_headers(
@@ -101,7 +101,6 @@ impl BlockingTransport {
                         self.timeout,
                     );
                     req.call()
-                        .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?
                 }
                 "HEAD" => {
                     ensure_empty_body(&current_body)?;
@@ -112,7 +111,6 @@ impl BlockingTransport {
                         self.timeout,
                     );
                     req.call()
-                        .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?
                 }
                 "DELETE" => {
                     ensure_empty_body(&current_body)?;
@@ -123,7 +121,6 @@ impl BlockingTransport {
                         self.timeout,
                     );
                     req.call()
-                        .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?
                 }
                 "PUT" => {
                     let req = apply_headers(
@@ -133,12 +130,8 @@ impl BlockingTransport {
                         self.timeout,
                     );
                     match current_body {
-                        BlockingBody::Empty => req
-                            .send_empty()
-                            .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?,
-                        BlockingBody::Bytes(b) => req
-                            .send(b.as_ref())
-                            .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?,
+                        BlockingBody::Empty => req.send_empty(),
+                        BlockingBody::Bytes(b) => req.send(b.as_ref()),
                     }
                 }
                 "POST" => {
@@ -149,29 +142,46 @@ impl BlockingTransport {
                         self.timeout,
                     );
                     match current_body {
-                        BlockingBody::Empty => req
-                            .send_empty()
-                            .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?,
-                        BlockingBody::Bytes(b) => req
-                            .send(b.as_ref())
-                            .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?,
+                        BlockingBody::Empty => req.send_empty(),
+                        BlockingBody::Bytes(b) => req.send(b.as_ref()),
                     }
                 }
                 _ => return Err(Error::invalid_config("unsupported HTTP method")),
             };
 
-            if should_retry_status(resp.status()) && attempt < max_attempts {
-                #[cfg(feature = "metrics")]
-                metrics::counter!(
-                    "s3_http_retries_total",
-                    "method" => method_label(&method),
-                    "reason" => "status"
-                )
-                .increment(1);
-                let delay = retry_delay_from_response(self.retry, attempt, &resp);
-                std::thread::sleep(delay);
-                continue;
-            }
+            let resp = match result {
+                Ok(resp) => resp,
+                Err(err) => {
+                    if attempt < max_attempts && should_retry_error(&err) {
+                        #[cfg(feature = "metrics")]
+                        metrics::counter!(
+                            "s3_http_retries_total",
+                            "method" => method_label(&method),
+                            "reason" => "transport"
+                        )
+                        .increment(1);
+                        #[cfg(feature = "tracing")]
+                        tracing::debug!(error = ?err, "retrying after transport error");
+
+                        let delay = backoff_delay(self.retry, attempt);
+                        std::thread::sleep(delay);
+                        continue;
+                    }
+
+                    #[cfg(feature = "metrics")]
+                    metrics::counter!(
+                        "s3_http_errors_total",
+                        "method" => method_label(&method),
+                        "kind" => "transport"
+                    )
+                    .increment(1);
+
+                    return Err(Error::transport(
+                        format!("request failed: {}", request_context(&method, &url)),
+                        Some(Box::new(err)),
+                    ));
+                }
+            };
 
             #[cfg(feature = "metrics")]
             {
@@ -188,6 +198,22 @@ impl BlockingTransport {
                 .record(start.elapsed().as_secs_f64());
             }
 
+            if should_retry_status(resp.status()) && attempt < max_attempts {
+                #[cfg(feature = "metrics")]
+                metrics::counter!(
+                    "s3_http_retries_total",
+                    "method" => method_label(&method),
+                    "reason" => "status"
+                )
+                .increment(1);
+                #[cfg(feature = "tracing")]
+                tracing::debug!(status = %resp.status(), "retrying after response status");
+
+                let delay = retry_delay_from_response(self.retry, attempt, &resp);
+                std::thread::sleep(delay);
+                continue;
+            }
+
             return Ok(resp);
         }
 
@@ -198,7 +224,13 @@ impl BlockingTransport {
             "kind" => "exhausted"
         )
         .increment(1);
-        Err(Error::transport("request failed after retries", None))
+        Err(Error::transport(
+            format!(
+                "request failed after retries: {}",
+                request_context(&method, &url)
+            ),
+            None,
+        ))
     }
 }
 
@@ -263,6 +295,31 @@ fn retry_delay_from_response(
 
 fn should_retry_status(status: StatusCode) -> bool {
     status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+}
+
+fn should_retry_error(err: &ureq::Error) -> bool {
+    matches!(
+        err,
+        ureq::Error::Timeout(_)
+            | ureq::Error::Protocol(_)
+            | ureq::Error::Io(_)
+            | ureq::Error::HostNotFound
+            | ureq::Error::ConnectionFailed
+    )
+}
+
+fn request_context(method: &Method, url: &Url) -> String {
+    let authority = match (url.host_str(), url.port()) {
+        (Some(host), Some(port)) => format!("{host}:{port}"),
+        (Some(host), None) => host.to_string(),
+        (None, _) => String::new(),
+    };
+
+    if authority.is_empty() {
+        format!("{method} {}", url.path())
+    } else {
+        format!("{method} {authority}{}", url.path())
+    }
 }
 
 fn ensure_empty_body(body: &BlockingBody) -> Result<()> {

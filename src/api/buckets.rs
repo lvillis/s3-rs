@@ -280,7 +280,7 @@ impl HeadBucketRequest {
         }
 
         Ok(HeadBucketOutput {
-            region: header_string(&resp, "x-amz-bucket-region"),
+            region: crate::util::headers::header_string(resp.headers(), "x-amz-bucket-region"),
         })
     }
 }
@@ -918,13 +918,6 @@ impl DeleteBucketPublicAccessBlockRequest {
 
         Err(response_error(resp).await)
     }
-}
-
-fn header_string(resp: &reqwest::Response, name: &str) -> Option<String> {
-    resp.headers()
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.to_string())
 }
 
 pub struct GetBucketConfigRawRequest {
