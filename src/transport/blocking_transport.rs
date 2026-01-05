@@ -46,8 +46,12 @@ impl BlockingTransport {
         #[cfg(feature = "rustls")]
         crate::transport::tls::ensure_rustls_crypto_provider();
 
+        let config = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .build();
+
         Ok(Self {
-            agent: ureq::agent(),
+            agent: ureq::Agent::new_with_config(config),
             retry,
             timeout,
             user_agent: user_agent.unwrap_or_else(default_user_agent),
@@ -386,5 +390,55 @@ mod tests {
             }
             other => panic!("expected api error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn send_returns_response_for_http_error_status() -> Result<()> {
+        use std::io::{ErrorKind, Write};
+        use std::net::TcpListener;
+        use std::time::Instant;
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .map_err(|e| Error::transport("failed to bind test server", Some(Box::new(e))))?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|e| Error::transport("failed to configure test server", Some(Box::new(e))))?;
+        let addr = listener.local_addr().map_err(|e| {
+            Error::transport("failed to read test server address", Some(Box::new(e)))
+        })?;
+
+        let handle = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let _ = stream.write_all(
+                            b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        );
+                        break;
+                    }
+                    Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                        if Instant::now() >= deadline {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let transport =
+            BlockingTransport::new(RetryConfig::default(), None, Some(Duration::from_secs(2)))?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp_result = transport.send(Method::GET, url, HeaderMap::new(), BlockingBody::Empty);
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+        let resp = resp_result?;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        Ok(())
     }
 }
