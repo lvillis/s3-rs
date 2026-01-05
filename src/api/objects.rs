@@ -646,6 +646,11 @@ impl DeleteObjectsRequest {
             http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/xml"),
         );
+        let content_md5 = crate::util::md5::content_md5_header_value(body.as_ref())?;
+        headers.insert(
+            http::header::HeaderName::from_static("content-md5"),
+            content_md5,
+        );
 
         let resp = self
             .client

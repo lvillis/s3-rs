@@ -217,7 +217,7 @@ pub(crate) fn response_error(status: StatusCode, headers: &http::HeaderMap, body
         };
     }
 
-    let snippet = truncate_snippet(body, 4096);
+    let snippet = crate::util::text::truncate_snippet(body, 4096);
 
     if let Some(parsed) = crate::util::xml::parse_error_xml(body) {
         return Error::Api {
@@ -320,15 +320,71 @@ fn apply_headers<B>(
     req
 }
 
-fn truncate_snippet(body: &str, max_len: usize) -> String {
-    if body.len() <= max_len {
-        return body.to_string();
-    }
-    let mut out = body[..max_len].to_string();
-    out.push_str("...");
-    out
-}
-
 fn default_user_agent() -> String {
     format!("s3/{}", env!("CARGO_PKG_VERSION"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn response_error_extracts_rate_limit() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert("x-amz-request-id", http::HeaderValue::from_static("req-1"));
+        headers.insert(
+            http::header::RETRY_AFTER,
+            http::HeaderValue::from_static("3"),
+        );
+
+        let err = response_error(StatusCode::TOO_MANY_REQUESTS, &headers, "slow down");
+        match err {
+            Error::RateLimited {
+                retry_after,
+                request_id,
+            } => {
+                assert_eq!(retry_after, Some(Duration::from_secs(3)));
+                assert_eq!(request_id.as_deref(), Some("req-1"));
+            }
+            other => panic!("expected rate limited error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn response_error_parses_xml_error_fields() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            "x-amz-request-id",
+            http::HeaderValue::from_static("req-outer"),
+        );
+
+        let body = r#"
+<Error>
+  <Code>AccessDenied</Code>
+  <Message>Access Denied</Message>
+  <RequestId>req-inner</RequestId>
+  <HostId>host-1</HostId>
+</Error>
+"#;
+
+        let err = response_error(StatusCode::FORBIDDEN, &headers, body);
+        match err {
+            Error::Api {
+                status,
+                code,
+                message,
+                request_id,
+                host_id,
+                body_snippet,
+            } => {
+                assert_eq!(status, StatusCode::FORBIDDEN);
+                assert_eq!(code.as_deref(), Some("AccessDenied"));
+                assert_eq!(message.as_deref(), Some("Access Denied"));
+                assert_eq!(request_id.as_deref(), Some("req-inner"));
+                assert_eq!(host_id.as_deref(), Some("host-1"));
+                assert!(body_snippet.unwrap_or_default().contains("AccessDenied"));
+            }
+            other => panic!("expected api error, got {other:?}"),
+        }
+    }
 }

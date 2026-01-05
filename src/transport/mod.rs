@@ -49,3 +49,39 @@ fn jitter_millis(max_millis: u128) -> u128 {
 
     nanos % max_millis
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backoff_delay_is_capped_and_non_negative() {
+        let cfg = RetryConfig {
+            max_attempts: 3,
+            base_delay: Duration::from_millis(200),
+            max_delay: Duration::from_secs(2),
+        };
+
+        let d1 = backoff_delay(cfg, 1);
+        let d2 = backoff_delay(cfg, 2);
+        let d3 = backoff_delay(cfg, 3);
+        let d99 = backoff_delay(cfg, 99);
+
+        assert!(d1 < Duration::from_millis(200));
+        assert!(d2 < Duration::from_millis(400));
+        assert!(d3 < Duration::from_millis(800));
+        assert!(d99 < cfg.max_delay);
+    }
+
+    #[test]
+    fn backoff_delay_zero_base_is_zero() {
+        let cfg = RetryConfig {
+            max_attempts: 3,
+            base_delay: Duration::from_millis(0),
+            max_delay: Duration::from_secs(2),
+        };
+
+        assert_eq!(backoff_delay(cfg, 1), Duration::from_millis(0));
+        assert_eq!(backoff_delay(cfg, 10), Duration::from_millis(0));
+    }
+}

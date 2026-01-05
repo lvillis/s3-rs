@@ -254,7 +254,7 @@ pub(crate) async fn response_error(resp: reqwest::Response) -> Error {
         Err(_) => Bytes::new(),
     };
     let body_str = String::from_utf8_lossy(&body_bytes).to_string();
-    let snippet = truncate_snippet(&body_str, 4096);
+    let snippet = crate::util::text::truncate_snippet(&body_str, 4096);
 
     if let Some(parsed) = crate::util::xml::parse_error_xml(&body_str) {
         return Error::Api {
@@ -329,15 +329,6 @@ fn method_label(method: &Method) -> &'static str {
         "POST" => "POST",
         _ => "OTHER",
     }
-}
-
-fn truncate_snippet(body: &str, max_len: usize) -> String {
-    if body.len() <= max_len {
-        return body.to_string();
-    }
-    let mut out = body[..max_len].to_string();
-    out.push_str("...");
-    out
 }
 
 fn default_user_agent() -> String {

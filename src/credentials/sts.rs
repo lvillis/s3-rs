@@ -256,7 +256,7 @@ fn form_body(params: &[(&str, &str)]) -> String {
 }
 
 fn sts_api_error(status: StatusCode, body: &str) -> Error {
-    let snippet = truncate_snippet(body, 4096);
+    let snippet = crate::util::text::truncate_snippet(body, 4096);
     if let Some(parsed) = crate::util::xml::parse_error_xml(body) {
         return Error::Api {
             status,
@@ -276,15 +276,6 @@ fn sts_api_error(status: StatusCode, body: &str) -> Error {
         host_id: None,
         body_snippet: Some(snippet),
     }
-}
-
-fn truncate_snippet(body: &str, max_len: usize) -> String {
-    if body.len() <= max_len {
-        return body.to_string();
-    }
-    let mut out = body[..max_len].to_string();
-    out.push_str("...");
-    out
 }
 
 fn parse_assume_role_response(body: &str) -> Result<Credentials, Error> {
@@ -357,4 +348,94 @@ fn parse_assume_role_with_web_identity_response(body: &str) -> Result<Credential
     )?;
     creds = creds.with_session_token(parsed.result.credentials.session_token)?;
     Ok(creds)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builds_regional_endpoint() {
+        let region = Region::new("us-east-1").unwrap();
+        let url = sts_regional_endpoint(&region).unwrap();
+        assert_eq!(url.as_str(), "https://sts.us-east-1.amazonaws.com/");
+    }
+
+    #[test]
+    fn form_body_percent_encodes() {
+        let body = form_body(&[("a+b", "c d"), ("x", "~")]);
+        assert_eq!(body, "a%2Bb=c%20d&x=~");
+    }
+
+    #[test]
+    fn parses_assume_role_response() {
+        let xml = r#"
+<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
+  <AssumeRoleResult>
+    <Credentials>
+      <AccessKeyId>AKIA_TEST</AccessKeyId>
+      <SecretAccessKey>SECRET_TEST</SecretAccessKey>
+      <SessionToken>TOKEN_TEST</SessionToken>
+    </Credentials>
+  </AssumeRoleResult>
+</AssumeRoleResponse>
+"#;
+
+        let creds = parse_assume_role_response(xml).unwrap();
+        assert_eq!(creds.access_key_id, "AKIA_TEST");
+        assert_eq!(creds.secret_access_key, "SECRET_TEST");
+        assert_eq!(creds.session_token.as_deref(), Some("TOKEN_TEST"));
+    }
+
+    #[test]
+    fn parses_assume_role_with_web_identity_response() {
+        let xml = r#"
+<AssumeRoleWithWebIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
+  <AssumeRoleWithWebIdentityResult>
+    <Credentials>
+      <AccessKeyId>AKIA_TEST</AccessKeyId>
+      <SecretAccessKey>SECRET_TEST</SecretAccessKey>
+      <SessionToken>TOKEN_TEST</SessionToken>
+    </Credentials>
+  </AssumeRoleWithWebIdentityResult>
+</AssumeRoleWithWebIdentityResponse>
+"#;
+
+        let creds = parse_assume_role_with_web_identity_response(xml).unwrap();
+        assert_eq!(creds.access_key_id, "AKIA_TEST");
+        assert_eq!(creds.secret_access_key, "SECRET_TEST");
+        assert_eq!(creds.session_token.as_deref(), Some("TOKEN_TEST"));
+    }
+
+    #[test]
+    fn sts_api_error_parses_xml_error() {
+        let err_xml = r#"
+<Error>
+  <Code>AccessDenied</Code>
+  <Message>Access Denied</Message>
+  <RequestId>req-123</RequestId>
+  <HostId>host-456</HostId>
+</Error>
+"#;
+
+        let err = sts_api_error(StatusCode::FORBIDDEN, err_xml);
+        match err {
+            Error::Api {
+                status,
+                code,
+                message,
+                request_id,
+                host_id,
+                body_snippet,
+            } => {
+                assert_eq!(status, StatusCode::FORBIDDEN);
+                assert_eq!(code.as_deref(), Some("AccessDenied"));
+                assert_eq!(message.as_deref(), Some("Access Denied"));
+                assert_eq!(request_id.as_deref(), Some("req-123"));
+                assert_eq!(host_id.as_deref(), Some("host-456"));
+                assert!(body_snippet.unwrap_or_default().contains("AccessDenied"));
+            }
+            other => panic!("expected api error, got {other:?}"),
+        }
+    }
 }

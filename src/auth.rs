@@ -203,3 +203,31 @@ pub enum AddressingStyle {
     Path,
     VirtualHosted,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn region_validates_non_empty() {
+        assert!(Region::new("").is_err());
+        assert!(Region::new("   ").is_err());
+        assert!(Region::new("us-east-1").is_ok());
+    }
+
+    #[test]
+    fn credentials_validate_and_redact_in_debug() {
+        assert!(Credentials::new("", "secret").is_err());
+        assert!(Credentials::new("akid", "").is_err());
+
+        let creds = Credentials::new("AKIA1234567890", "SECRET1234567890")
+            .unwrap()
+            .with_session_token("TOKEN1234567890")
+            .unwrap();
+
+        let dbg = format!("{creds:?}");
+        assert!(!dbg.contains("SECRET1234567890"));
+        assert!(!dbg.contains("TOKEN1234567890"));
+        assert!(dbg.contains("<redacted>"));
+    }
+}

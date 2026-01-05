@@ -38,3 +38,25 @@ pub(crate) fn metadata_header_name(value: &str) -> Result<HeaderName, Error> {
     HeaderName::from_bytes(name.as_bytes())
         .map_err(|_| Error::invalid_config("invalid metadata key for x-amz-meta-* header"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redacts_values_consistently() {
+        assert_eq!(redact_value(""), "<redacted>");
+        assert_eq!(redact_value("   "), "<redacted>");
+        assert_eq!(redact_value("12345678"), "<redacted>");
+        assert_eq!(redact_value("123456789"), "1234...6789");
+    }
+
+    #[test]
+    fn builds_metadata_header_name() {
+        let name = metadata_header_name(" Foo ").unwrap();
+        assert_eq!(name.as_str(), "x-amz-meta-foo");
+
+        assert!(metadata_header_name("").is_err());
+        assert!(metadata_header_name("a b").is_err());
+    }
+}

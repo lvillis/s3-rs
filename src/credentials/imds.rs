@@ -309,3 +309,37 @@ fn container_auth_headers_blocking() -> Result<http::HeaderMap, Error> {
     }
     Ok(headers)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserializes_and_converts_metadata_credentials() {
+        let json = r#"
+{
+  "AccessKeyId": "AKIA_TEST",
+  "SecretAccessKey": "SECRET_TEST",
+  "Token": "TOKEN_TEST"
+}
+"#;
+        let parsed: MetadataCredentials = serde_json::from_str(json).unwrap();
+        let creds = parsed.into_credentials().unwrap();
+        assert_eq!(creds.access_key_id, "AKIA_TEST");
+        assert_eq!(creds.secret_access_key, "SECRET_TEST");
+        assert_eq!(creds.session_token.as_deref(), Some("TOKEN_TEST"));
+    }
+
+    #[test]
+    fn missing_token_is_ok() {
+        let json = r#"
+{
+  "AccessKeyId": "AKIA_TEST",
+  "SecretAccessKey": "SECRET_TEST"
+}
+"#;
+        let parsed: MetadataCredentials = serde_json::from_str(json).unwrap();
+        let creds = parsed.into_credentials().unwrap();
+        assert!(creds.session_token.is_none());
+    }
+}

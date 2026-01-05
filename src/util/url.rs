@@ -192,4 +192,38 @@ mod tests {
         assert_eq!(resolved.url.host_str().unwrap(), "s3.example.com");
         assert_eq!(resolved.canonical_uri, "/bucket.with.dots/key");
     }
+
+    #[test]
+    fn path_encoding_preserves_slash_in_key() {
+        let base = Url::parse("https://example.com").unwrap();
+        let resolved = resolve_url(
+            &base,
+            Some("my-bucket"),
+            Some("a/b"),
+            &[],
+            AddressingStyle::Path,
+        )
+        .unwrap();
+
+        assert_eq!(resolved.canonical_uri, "/my-bucket/a/b");
+    }
+
+    #[test]
+    fn query_params_are_canonicalized_and_applied_to_url() {
+        let base = Url::parse("https://example.com").unwrap();
+        let resolved = resolve_url(
+            &base,
+            Some("my-bucket"),
+            Some("key"),
+            &[
+                ("b".to_string(), "2".to_string()),
+                ("a".to_string(), "".to_string()),
+            ],
+            AddressingStyle::Path,
+        )
+        .unwrap();
+
+        assert_eq!(resolved.canonical_query_string, "a=&b=2");
+        assert_eq!(resolved.url.query().unwrap_or(""), "a=&b=2");
+    }
 }

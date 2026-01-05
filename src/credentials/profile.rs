@@ -153,3 +153,51 @@ fn lookup_secret_key(
 ) -> Option<String> {
     lookup(map, section, "aws_secret_access_key").or_else(|| lookup(map, section, "aws_secret_key"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_ini_sections_and_keys() {
+        let ini = r#"
+; comment
+[default]
+aws_access_key_id = AKID
+aws_secret_access_key= SECRET
+aws_session_token: TOKEN
+
+[profile dev]
+aws_access_key = AKID2
+aws_secret_key : SECRET2
+
+ignored = outside
+"#;
+
+        let parsed = parse_ini(ini);
+
+        assert_eq!(
+            lookup_access_key(&parsed, "default").as_deref(),
+            Some("AKID")
+        );
+        assert_eq!(
+            lookup_secret_key(&parsed, "default").as_deref(),
+            Some("SECRET")
+        );
+        assert_eq!(
+            lookup(&parsed, "default", "aws_session_token").as_deref(),
+            Some("TOKEN")
+        );
+
+        assert_eq!(
+            lookup_access_key(&parsed, "profile dev").as_deref(),
+            Some("AKID2")
+        );
+        assert_eq!(
+            lookup_secret_key(&parsed, "profile dev").as_deref(),
+            Some("SECRET2")
+        );
+
+        assert!(lookup(&parsed, "default", "ignored").is_none());
+    }
+}

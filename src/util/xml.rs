@@ -746,6 +746,27 @@ mod tests {
     use crate::types::DeleteObjectIdentifier;
 
     #[test]
+    fn parses_error_xml() {
+        let xml = r#"
+<Error>
+  <Code>NoSuchKey</Code>
+  <Message>The specified key does not exist.</Message>
+  <RequestId>req-123</RequestId>
+  <HostId>host-456</HostId>
+</Error>
+"#;
+
+        let err = parse_error_xml(xml).unwrap();
+        assert_eq!(err.code.as_deref(), Some("NoSuchKey"));
+        assert_eq!(
+            err.message.as_deref(),
+            Some("The specified key does not exist.")
+        );
+        assert_eq!(err.request_id.as_deref(), Some("req-123"));
+        assert_eq!(err.host_id.as_deref(), Some("host-456"));
+    }
+
+    #[test]
     fn parses_list_buckets() {
         let xml = r#"
 <ListAllMyBucketsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
@@ -766,6 +787,169 @@ mod tests {
         assert_eq!(out.owner.unwrap().id.as_deref(), Some("owner-id"));
         assert_eq!(out.buckets.len(), 1);
         assert_eq!(out.buckets[0].name, "bucket-a");
+    }
+
+    #[test]
+    fn parses_bucket_lifecycle() {
+        let xml = r#"
+<LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Rule>
+    <ID>rule-1</ID>
+    <Status>Enabled</Status>
+    <Filter>
+      <Prefix>logs/</Prefix>
+    </Filter>
+    <Expiration>
+      <Days>30</Days>
+    </Expiration>
+  </Rule>
+</LifecycleConfiguration>
+"#;
+
+        let cfg = parse_bucket_lifecycle(xml).unwrap();
+        assert_eq!(cfg.rules.len(), 1);
+        let r = &cfg.rules[0];
+        assert_eq!(r.id.as_deref(), Some("rule-1"));
+        assert_eq!(r.status, types::BucketLifecycleStatus::Enabled);
+        assert_eq!(r.prefix.as_deref(), Some("logs/"));
+        assert_eq!(r.expiration_days, Some(30));
+    }
+
+    #[test]
+    fn parses_bucket_cors() {
+        let xml = r#"
+<CORSConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <CORSRule>
+    <ID>rule-1</ID>
+    <AllowedOrigin>*</AllowedOrigin>
+    <AllowedMethod>GET</AllowedMethod>
+    <AllowedMethod>PATCH</AllowedMethod>
+    <AllowedHeader>*</AllowedHeader>
+    <ExposeHeader>ETag</ExposeHeader>
+    <MaxAgeSeconds>3000</MaxAgeSeconds>
+  </CORSRule>
+</CORSConfiguration>
+"#;
+
+        let cfg = parse_bucket_cors(xml).unwrap();
+        assert_eq!(cfg.rules.len(), 1);
+        let r = &cfg.rules[0];
+        assert_eq!(r.id.as_deref(), Some("rule-1"));
+        assert_eq!(r.allowed_origins, vec!["*".to_string()]);
+        assert_eq!(
+            r.allowed_methods,
+            vec![
+                types::CorsMethod::Get,
+                types::CorsMethod::Other("PATCH".to_string())
+            ]
+        );
+        assert_eq!(r.allowed_headers, vec!["*".to_string()]);
+        assert_eq!(r.expose_headers, vec!["ETag".to_string()]);
+        assert_eq!(r.max_age_seconds, Some(3000));
+    }
+
+    #[test]
+    fn parses_bucket_tagging() {
+        let xml = r#"
+<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <TagSet>
+    <Tag>
+      <Key>k</Key>
+      <Value>v</Value>
+    </Tag>
+  </TagSet>
+</Tagging>
+"#;
+
+        let cfg = parse_bucket_tagging(xml).unwrap();
+        assert_eq!(cfg.tags.len(), 1);
+        assert_eq!(cfg.tags[0].key, "k");
+        assert_eq!(cfg.tags[0].value, "v");
+    }
+
+    #[test]
+    fn parses_bucket_encryption() {
+        let xml = r#"
+<ServerSideEncryptionConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Rule>
+    <ApplyServerSideEncryptionByDefault>
+      <SSEAlgorithm>aws:kms</SSEAlgorithm>
+      <KMSMasterKeyID>key-id</KMSMasterKeyID>
+    </ApplyServerSideEncryptionByDefault>
+    <BucketKeyEnabled>true</BucketKeyEnabled>
+  </Rule>
+</ServerSideEncryptionConfiguration>
+"#;
+
+        let cfg = parse_bucket_encryption(xml).unwrap();
+        assert_eq!(cfg.rules.len(), 1);
+        assert_eq!(
+            cfg.rules[0].apply.sse_algorithm,
+            types::SseAlgorithm::AwsKms
+        );
+        assert_eq!(
+            cfg.rules[0].apply.kms_master_key_id.as_deref(),
+            Some("key-id")
+        );
+        assert_eq!(cfg.rules[0].bucket_key_enabled, Some(true));
+    }
+
+    #[test]
+    fn parses_bucket_public_access_block() {
+        let xml = r#"
+<PublicAccessBlockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <BlockPublicAcls>true</BlockPublicAcls>
+  <IgnorePublicAcls>false</IgnorePublicAcls>
+  <BlockPublicPolicy>true</BlockPublicPolicy>
+  <RestrictPublicBuckets>false</RestrictPublicBuckets>
+</PublicAccessBlockConfiguration>
+"#;
+
+        let cfg = parse_bucket_public_access_block(xml).unwrap();
+        assert!(cfg.block_public_acls);
+        assert!(!cfg.ignore_public_acls);
+        assert!(cfg.block_public_policy);
+        assert!(!cfg.restrict_public_buckets);
+    }
+
+    #[test]
+    fn parses_delete_objects() {
+        let xml = r#"
+<DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Deleted>
+    <Key>a</Key>
+  </Deleted>
+  <Error>
+    <Key>b</Key>
+    <Code>AccessDenied</Code>
+    <Message>Access Denied</Message>
+  </Error>
+</DeleteResult>
+"#;
+
+        let out = parse_delete_objects(xml).unwrap();
+        assert_eq!(out.deleted.len(), 1);
+        assert_eq!(out.deleted[0].key.as_deref(), Some("a"));
+        assert_eq!(out.errors.len(), 1);
+        assert_eq!(out.errors[0].key.as_deref(), Some("b"));
+        assert_eq!(out.errors[0].code.as_deref(), Some("AccessDenied"));
+    }
+
+    #[test]
+    fn parses_copy_object() {
+        let xml = r#"
+<CopyObjectResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <LastModified>2020-01-01T00:00:00.000Z</LastModified>
+  <ETag>"etag"</ETag>
+</CopyObjectResult>
+"#;
+
+        let out = parse_copy_object(xml).unwrap();
+        assert_eq!(out.etag.as_deref(), Some("\"etag\""));
+        assert_eq!(
+            out.last_modified.as_deref(),
+            Some("2020-01-01T00:00:00.000Z")
+        );
     }
 
     #[test]
@@ -796,6 +980,98 @@ mod tests {
         assert!(xml.contains("xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\""));
         assert!(xml.contains("<Status>Enabled</Status>"));
         assert!(xml.contains("<MfaDelete>Disabled</MfaDelete>"));
+    }
+
+    #[test]
+    fn encodes_bucket_lifecycle() {
+        let cfg = types::BucketLifecycleConfiguration {
+            rules: vec![types::BucketLifecycleRule {
+                id: Some("rule-1".to_string()),
+                status: types::BucketLifecycleStatus::Enabled,
+                prefix: Some("logs/".to_string()),
+                expiration_days: Some(30),
+                expiration_date: None,
+            }],
+        };
+
+        let xml = encode_bucket_lifecycle(&cfg).unwrap();
+        let xml = String::from_utf8_lossy(&xml).to_string();
+        assert!(xml.contains("<LifecycleConfiguration"));
+        assert!(xml.contains("<Rule>"));
+        assert!(xml.contains("<ID>rule-1</ID>"));
+        assert!(xml.contains("<Status>Enabled</Status>"));
+        assert!(xml.contains("<Prefix>logs/</Prefix>"));
+        assert!(xml.contains("<Days>30</Days>"));
+    }
+
+    #[test]
+    fn encodes_bucket_cors() {
+        let cfg = types::BucketCorsConfiguration {
+            rules: vec![types::BucketCorsRule {
+                id: Some("rule-1".to_string()),
+                allowed_origins: vec!["*".to_string()],
+                allowed_methods: vec![types::CorsMethod::Get, types::CorsMethod::Put],
+                allowed_headers: vec!["*".to_string()],
+                expose_headers: vec!["ETag".to_string()],
+                max_age_seconds: Some(3000),
+            }],
+        };
+
+        let xml = encode_bucket_cors(&cfg).unwrap();
+        let xml = String::from_utf8_lossy(&xml).to_string();
+        assert!(xml.contains("<CORSConfiguration"));
+        assert!(xml.contains("<AllowedOrigin>*</AllowedOrigin>"));
+        assert!(xml.contains("<AllowedMethod>GET</AllowedMethod>"));
+        assert!(xml.contains("<AllowedMethod>PUT</AllowedMethod>"));
+    }
+
+    #[test]
+    fn encodes_bucket_tagging() {
+        let cfg = types::BucketTagging {
+            tags: vec![types::Tag {
+                key: "k".to_string(),
+                value: "v".to_string(),
+            }],
+        };
+        let xml = encode_bucket_tagging(&cfg).unwrap();
+        let xml = String::from_utf8_lossy(&xml).to_string();
+        assert!(xml.contains("<Tagging"));
+        assert!(xml.contains("<Key>k</Key>"));
+        assert!(xml.contains("<Value>v</Value>"));
+    }
+
+    #[test]
+    fn encodes_bucket_encryption() {
+        let cfg = types::BucketEncryptionConfiguration {
+            rules: vec![types::BucketEncryptionRule {
+                apply: types::ApplyServerSideEncryptionByDefault {
+                    sse_algorithm: types::SseAlgorithm::AwsKms,
+                    kms_master_key_id: Some("key-id".to_string()),
+                },
+                bucket_key_enabled: Some(true),
+            }],
+        };
+        let xml = encode_bucket_encryption(&cfg).unwrap();
+        let xml = String::from_utf8_lossy(&xml).to_string();
+        assert!(xml.contains("<ServerSideEncryptionConfiguration"));
+        assert!(xml.contains("<SSEAlgorithm>aws:kms</SSEAlgorithm>"));
+        assert!(xml.contains("<KMSMasterKeyID>key-id</KMSMasterKeyID>"));
+        assert!(xml.contains("<BucketKeyEnabled>true</BucketKeyEnabled>"));
+    }
+
+    #[test]
+    fn encodes_bucket_public_access_block() {
+        let cfg = types::BucketPublicAccessBlockConfiguration {
+            block_public_acls: true,
+            ignore_public_acls: false,
+            block_public_policy: true,
+            restrict_public_buckets: false,
+        };
+        let xml = encode_bucket_public_access_block(&cfg).unwrap();
+        let xml = String::from_utf8_lossy(&xml).to_string();
+        assert!(xml.contains("<PublicAccessBlockConfiguration"));
+        assert!(xml.contains("<BlockPublicAcls>true</BlockPublicAcls>"));
+        assert!(xml.contains("<IgnorePublicAcls>false</IgnorePublicAcls>"));
     }
 
     #[cfg(feature = "multipart")]
