@@ -111,6 +111,51 @@ async fn minio_put_get_list_delete_roundtrip() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn minio_virtual_hosted_put_get_delete_roundtrip() -> Result<(), Error> {
+    let Some(cfg) = common::load_config()? else {
+        return Ok(());
+    };
+
+    let Some(endpoint) = common::lvh_endpoint(&cfg.endpoint)? else {
+        return Ok(());
+    };
+
+    let client = s3::Client::builder(&endpoint)?
+        .region(cfg.region.as_str())
+        .auth(cfg.auth.clone())
+        .addressing_style(AddressingStyle::VirtualHosted)
+        .max_attempts(1)
+        .build()?;
+
+    common::with_bucket_async(&client, "s3-it-vhost-", |bucket| {
+        let client = client.clone();
+        async move {
+            let key = "a+b.txt";
+            let body = Bytes::from_static(b"hello");
+            client
+                .objects()
+                .put(&bucket, key)
+                .body_bytes(body.clone())
+                .send()
+                .await?;
+
+            let got = client
+                .objects()
+                .get(&bucket, key)
+                .send()
+                .await?
+                .bytes()
+                .await?;
+            assert_eq!(got, body);
+
+            client.objects().delete(&bucket, key).send().await?;
+            Ok(())
+        }
+    })
+    .await
+}
+
+#[tokio::test]
 async fn minio_list_buckets_and_bucket_configs() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());

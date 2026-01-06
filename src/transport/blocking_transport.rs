@@ -451,7 +451,7 @@ mod tests {
 
     #[test]
     fn send_returns_response_for_http_error_status() -> Result<()> {
-        use std::io::{ErrorKind, Write};
+        use std::io::{ErrorKind, Read, Write};
         use std::net::TcpListener;
         use std::time::Instant;
 
@@ -469,6 +469,9 @@ mod tests {
             loop {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+                        let mut buf = [0u8; 1024];
+                        let _ = stream.read(&mut buf);
                         let _ = stream.write_all(
                             b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                         );

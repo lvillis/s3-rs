@@ -396,3 +396,201 @@ fn method_label(method: &Method) -> &'static str {
 fn default_user_agent() -> String {
     format!("s3/{}", env!("CARGO_PKG_VERSION"))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::{ErrorKind, Read, Write};
+    use std::net::{SocketAddr, TcpListener};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Instant;
+
+    use super::*;
+
+    fn spawn_test_server(
+        responses: Vec<Vec<u8>>,
+    ) -> Result<(SocketAddr, std::thread::JoinHandle<()>, Arc<AtomicUsize>)> {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .map_err(|e| Error::transport("failed to bind test server", Some(Box::new(e))))?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|e| Error::transport("failed to configure test server", Some(Box::new(e))))?;
+        let addr = listener.local_addr().map_err(|e| {
+            Error::transport("failed to read test server address", Some(Box::new(e)))
+        })?;
+
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hits_thread = hits.clone();
+
+        let handle = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            for response in responses {
+                loop {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+                            let mut buf = [0u8; 1024];
+                            let _ = stream.read(&mut buf);
+                            let _ = stream.write_all(&response);
+                            let _ = stream.flush();
+                            hits_thread.fetch_add(1, Ordering::SeqCst);
+                            break;
+                        }
+                        Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                            if Instant::now() >= deadline {
+                                return;
+                            }
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(_) => return,
+                    }
+                }
+            }
+        });
+
+        Ok((addr, handle, hits))
+    }
+
+    #[tokio::test]
+    async fn send_returns_response_for_http_error_status() -> Result<()> {
+        let (addr, handle, hits) = spawn_test_server(vec![
+            b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+        ])?;
+
+        let retry = RetryConfig {
+            max_attempts: 1,
+            ..RetryConfig::default()
+        };
+        let transport = AsyncTransport::new(retry, None, Some(Duration::from_secs(5)))?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp = transport
+            .send(Method::GET, url, HeaderMap::new(), AsyncBody::Empty)
+            .await?;
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn response_error_extracts_rate_limit() -> Result<()> {
+        let (addr, handle, _) = spawn_test_server(vec![
+            b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 3\r\nx-amz-request-id: req-1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+        ])?;
+
+        let retry = RetryConfig {
+            max_attempts: 1,
+            ..RetryConfig::default()
+        };
+        let transport = AsyncTransport::new(retry, None, Some(Duration::from_secs(5)))?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp = transport
+            .send(Method::GET, url, HeaderMap::new(), AsyncBody::Empty)
+            .await?;
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+
+        let err = response_error(resp).await;
+        match err {
+            Error::RateLimited {
+                retry_after,
+                request_id,
+            } => {
+                assert_eq!(retry_after, Some(Duration::from_secs(3)));
+                assert_eq!(request_id.as_deref(), Some("req-1"));
+            }
+            other => panic!("expected rate limited error, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn response_error_parses_xml_error_fields() -> Result<()> {
+        let body = r#"
+<Error>
+  <Code>AccessDenied</Code>
+  <Message>Access Denied</Message>
+  <RequestId>req-inner</RequestId>
+  <HostId>host-1</HostId>
+</Error>
+"#;
+        let response = format!(
+            "HTTP/1.1 403 Forbidden\r\nx-amz-request-id: req-outer\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let (addr, handle, _) = spawn_test_server(vec![response.into_bytes()])?;
+
+        let retry = RetryConfig {
+            max_attempts: 1,
+            ..RetryConfig::default()
+        };
+        let transport = AsyncTransport::new(retry, None, Some(Duration::from_secs(5)))?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp = transport
+            .send(Method::GET, url, HeaderMap::new(), AsyncBody::Empty)
+            .await?;
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+
+        let err = response_error(resp).await;
+        match err {
+            Error::Api {
+                status,
+                code,
+                message,
+                request_id,
+                host_id,
+                body_snippet,
+            } => {
+                assert_eq!(status, StatusCode::FORBIDDEN);
+                assert_eq!(code.as_deref(), Some("AccessDenied"));
+                assert_eq!(message.as_deref(), Some("Access Denied"));
+                assert_eq!(request_id.as_deref(), Some("req-inner"));
+                assert_eq!(host_id.as_deref(), Some("host-1"));
+                assert!(body_snippet.unwrap_or_default().contains("AccessDenied"));
+            }
+            other => panic!("expected api error, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn send_retries_on_retryable_status_for_replayable_body() -> Result<()> {
+        let (addr, handle, hits) = spawn_test_server(vec![
+            b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+        ])?;
+
+        let retry = RetryConfig {
+            max_attempts: 2,
+            base_delay: Duration::from_millis(0),
+            max_delay: Duration::from_millis(0),
+        };
+        let transport = AsyncTransport::new(retry, None, Some(Duration::from_secs(5)))?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp = transport
+            .send(Method::GET, url, HeaderMap::new(), AsyncBody::Empty)
+            .await?;
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        assert_eq!(resp.status(), StatusCode::OK);
+        Ok(())
+    }
+}

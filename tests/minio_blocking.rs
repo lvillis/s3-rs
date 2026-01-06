@@ -131,6 +131,40 @@ fn minio_blocking_put_get_delete_roundtrip() -> Result<(), Error> {
 }
 
 #[test]
+fn minio_blocking_virtual_hosted_put_get_delete_roundtrip() -> Result<(), Error> {
+    let Some(cfg) = common::load_config()? else {
+        return Ok(());
+    };
+
+    let Some(endpoint) = common::lvh_endpoint(&cfg.endpoint)? else {
+        return Ok(());
+    };
+
+    let client = s3::BlockingClient::builder(&endpoint)?
+        .region(cfg.region.as_str())
+        .auth(cfg.auth.clone())
+        .addressing_style(AddressingStyle::VirtualHosted)
+        .max_attempts(1)
+        .build()?;
+
+    common::with_bucket_blocking(&client, "s3-it-blocking-vhost-", |bucket| {
+        let key = "a+b.txt";
+        let body = Bytes::from_static(b"hello");
+        client
+            .objects()
+            .put(&bucket, key)
+            .body_bytes(body.clone())
+            .send()?;
+
+        let got = client.objects().get(&bucket, key).send()?.bytes()?;
+        assert_eq!(got, body);
+
+        client.objects().delete(&bucket, key).send()?;
+        Ok(())
+    })
+}
+
+#[test]
 fn minio_blocking_get_range_and_conditions() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());

@@ -1,5 +1,6 @@
 use std::{
     env,
+    net::ToSocketAddrs as _,
     sync::atomic::{AtomicUsize, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -40,6 +41,21 @@ pub(crate) fn unique_bucket(prefix: &str) -> String {
         .as_millis();
     let n = BUCKET_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("{prefix}{now}-{n}")
+}
+
+pub(crate) fn lvh_endpoint(original: &str) -> Result<Option<String>, Error> {
+    let mut url = url::Url::parse(original)
+        .map_err(|_| Error::invalid_config("S3_TEST_ENDPOINT must be a valid URL"))?;
+
+    let port = url.port_or_known_default().unwrap_or(80);
+    if format!("test.lvh.me:{port}").to_socket_addrs().is_err() {
+        return Ok(None);
+    }
+
+    url.set_host(Some("lvh.me"))
+        .map_err(|_| Error::invalid_config("failed to build virtual-hosted endpoint"))?;
+
+    Ok(Some(url.to_string()))
 }
 
 #[cfg(feature = "async")]
