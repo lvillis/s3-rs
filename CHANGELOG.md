@@ -1,3 +1,13 @@
+## [0.1.4] - 2026-01-06
+
+### 🧪 Testing
+
+- Fix MinIO virtual-hosted integration by creating buckets via path-style
+
+### ⚙️ Miscellaneous Tasks
+
+- *(ci)* Update ci.yaml
+- *(ci)* Set MINIO_DOMAIN for vhost tests
 ## [0.1.3] - 2026-01-06
 
 ### 🚀 Features
@@ -14,6 +24,7 @@
 - *(examples)* Add practical async/blocking usage examples
 - *(ci)* Update
 - *(examples)* Add more runnable usage guides
+- Release s3 version 0.1.3
 ## [0.1.2] - 2026-01-06
 
 ### 🐛 Bug Fixes
