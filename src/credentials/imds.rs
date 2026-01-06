@@ -1,4 +1,9 @@
-use crate::{auth::Credentials, error::Error};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+
+use crate::{
+    auth::{Credentials, CredentialsSnapshot},
+    error::Error,
+};
 
 #[derive(serde::Deserialize)]
 struct MetadataCredentials {
@@ -6,22 +11,42 @@ struct MetadataCredentials {
     access_key_id: String,
     #[serde(rename = "SecretAccessKey")]
     secret_access_key: String,
+    #[serde(rename = "Expiration")]
+    expiration: Option<String>,
     #[serde(rename = "Token")]
     token: Option<String>,
 }
 
 impl MetadataCredentials {
-    fn into_credentials(self) -> Result<Credentials, Error> {
+    fn into_snapshot(self) -> Result<CredentialsSnapshot, Error> {
         let mut creds = Credentials::new(self.access_key_id, self.secret_access_key)?;
         if let Some(token) = self.token {
             creds = creds.with_session_token(token)?;
         }
-        Ok(creds)
+
+        let expiration = self
+            .expiration
+            .ok_or_else(|| Error::decode("missing credentials expiration", None))?;
+        let expiration = expiration.trim();
+        if expiration.is_empty() {
+            return Err(Error::decode("missing credentials expiration", None));
+        }
+        let expires_at = parse_expiration(expiration)?;
+        Ok(CredentialsSnapshot::new(creds).with_expires_at(expires_at))
     }
 }
 
+fn parse_expiration(value: &str) -> Result<OffsetDateTime, Error> {
+    OffsetDateTime::parse(value, &Rfc3339).map_err(|e| {
+        Error::decode(
+            "failed to parse credentials expiration timestamp",
+            Some(Box::new(e)),
+        )
+    })
+}
+
 #[cfg(feature = "async")]
-pub(crate) async fn load_async() -> Result<Credentials, Error> {
+pub(crate) async fn load_async() -> Result<CredentialsSnapshot, Error> {
     use std::time::Duration;
 
     let client = reqwest::Client::builder()
@@ -41,7 +66,7 @@ pub(crate) async fn load_async() -> Result<Credentials, Error> {
                 Some(Box::new(e)),
             )
         })?;
-        return parsed.into_credentials();
+        return parsed.into_snapshot();
     }
 
     if let Some(rel) = std::env::var("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
@@ -57,7 +82,7 @@ pub(crate) async fn load_async() -> Result<Credentials, Error> {
                 Some(Box::new(e)),
             )
         })?;
-        return parsed.into_credentials();
+        return parsed.into_snapshot();
     }
 
     let token = fetch_imds_v2_token(&client).await.ok();
@@ -83,7 +108,7 @@ pub(crate) async fn load_async() -> Result<Credentials, Error> {
     let body = http_get_text(&client, &url, headers).await?;
     let parsed: MetadataCredentials = serde_json::from_str(&body)
         .map_err(|e| Error::decode("failed to parse IMDS credentials JSON", Some(Box::new(e))))?;
-    parsed.into_credentials()
+    parsed.into_snapshot()
 }
 
 #[cfg(feature = "async")]
@@ -164,7 +189,7 @@ fn container_auth_headers() -> Result<http::HeaderMap, Error> {
 }
 
 #[cfg(feature = "blocking")]
-pub(crate) fn load_blocking() -> Result<Credentials, Error> {
+pub(crate) fn load_blocking() -> Result<CredentialsSnapshot, Error> {
     if let Some(full) = std::env::var("AWS_CONTAINER_CREDENTIALS_FULL_URI")
         .ok()
         .filter(|v| !v.is_empty())
@@ -177,7 +202,7 @@ pub(crate) fn load_blocking() -> Result<Credentials, Error> {
                 Some(Box::new(e)),
             )
         })?;
-        return parsed.into_credentials();
+        return parsed.into_snapshot();
     }
 
     if let Some(rel) = std::env::var("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
@@ -193,7 +218,7 @@ pub(crate) fn load_blocking() -> Result<Credentials, Error> {
                 Some(Box::new(e)),
             )
         })?;
-        return parsed.into_credentials();
+        return parsed.into_snapshot();
     }
 
     let token = fetch_imds_v2_token_blocking().ok();
@@ -217,7 +242,7 @@ pub(crate) fn load_blocking() -> Result<Credentials, Error> {
     let body = http_get_text_blocking(&url, &headers)?;
     let parsed: MetadataCredentials = serde_json::from_str(&body)
         .map_err(|e| Error::decode("failed to parse IMDS credentials JSON", Some(Box::new(e))))?;
-    parsed.into_credentials()
+    parsed.into_snapshot()
 }
 
 #[cfg(feature = "blocking")]
@@ -319,15 +344,21 @@ mod tests {
         let json = r#"
 {
   "AccessKeyId": "AKIA_TEST",
+  "Expiration": "2020-01-01T00:00:00Z",
   "SecretAccessKey": "SECRET_TEST",
   "Token": "TOKEN_TEST"
 }
 "#;
         let parsed: MetadataCredentials = serde_json::from_str(json).unwrap();
-        let creds = parsed.into_credentials().unwrap();
+        let snapshot = parsed.into_snapshot().unwrap();
+        let creds = snapshot.credentials();
         assert_eq!(creds.access_key_id, "AKIA_TEST");
         assert_eq!(creds.secret_access_key, "SECRET_TEST");
         assert_eq!(creds.session_token.as_deref(), Some("TOKEN_TEST"));
+        assert_eq!(
+            snapshot.expires_at(),
+            Some(parse_expiration("2020-01-01T00:00:00Z").unwrap())
+        );
     }
 
     #[test]
@@ -335,11 +366,17 @@ mod tests {
         let json = r#"
 {
   "AccessKeyId": "AKIA_TEST",
+  "Expiration": "2020-01-01T00:00:00Z",
   "SecretAccessKey": "SECRET_TEST"
 }
 "#;
         let parsed: MetadataCredentials = serde_json::from_str(json).unwrap();
-        let creds = parsed.into_credentials().unwrap();
+        let snapshot = parsed.into_snapshot().unwrap();
+        let creds = snapshot.credentials();
         assert!(creds.session_token.is_none());
+        assert_eq!(
+            snapshot.expires_at(),
+            Some(parse_expiration("2020-01-01T00:00:00Z").unwrap())
+        );
     }
 }

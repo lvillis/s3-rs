@@ -75,7 +75,7 @@ impl BlockingClient {
             self.inner.addressing,
         )?;
 
-        if let Some(creds) = self.inner.auth.credentials() {
+        if let Some(snapshot) = self.inner.auth.credentials_snapshot_blocking()? {
             let now = OffsetDateTime::now_utc();
             let payload_hash = match &body {
                 BlockingBody::Empty => util::signing::payload_hash_empty(),
@@ -88,7 +88,7 @@ impl BlockingClient {
                 &mut headers,
                 &payload_hash,
                 &self.inner.region,
-                creds,
+                snapshot.credentials(),
                 now,
             )?;
         }
@@ -107,10 +107,10 @@ impl BlockingClient {
         query_params: Vec<(String, String)>,
         headers: HeaderMap,
     ) -> Result<crate::types::PresignedRequest> {
-        let creds = self
+        let snapshot = self
             .inner
             .auth
-            .credentials()
+            .credentials_snapshot_blocking()?
             .ok_or_else(|| Error::invalid_config("presign requires credentials"))?;
 
         let resolved = util::url::resolve_url(
@@ -122,10 +122,23 @@ impl BlockingClient {
         )?;
 
         let now = OffsetDateTime::now_utc();
+        if let Some(expires_at) = snapshot.expires_at() {
+            if expires_at <= now {
+                return Err(Error::invalid_config("credentials are expired"));
+            }
+            let remaining: std::time::Duration = (expires_at - now).try_into().map_err(|_| {
+                Error::invalid_config("failed to calculate credentials expiration window")
+            })?;
+            if remaining < expires_in {
+                return Err(Error::invalid_config(
+                    "presign expires_in exceeds credentials lifetime",
+                ));
+            }
+        }
         util::signing::presign(
             method,
             resolved,
-            util::signing::SigV4Params::for_s3(&self.inner.region, creds, now),
+            util::signing::SigV4Params::for_s3(&self.inner.region, snapshot.credentials(), now),
             expires_in,
             &query_params,
             &headers,

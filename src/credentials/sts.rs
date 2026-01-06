@@ -1,8 +1,9 @@
 use bytes::Bytes;
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::{
-    auth::{AddressingStyle, Credentials, Region},
+    auth::{AddressingStyle, Credentials, CredentialsSnapshot, Region},
     error::Error,
 };
 
@@ -14,7 +15,7 @@ pub(crate) async fn assume_role_async(
     role_arn: String,
     role_session_name: String,
     source_credentials: Credentials,
-) -> Result<Credentials, Error> {
+) -> Result<CredentialsSnapshot, Error> {
     use std::time::Duration;
 
     let endpoint = sts_regional_endpoint(&region)?;
@@ -78,7 +79,7 @@ pub(crate) fn assume_role_blocking(
     role_arn: String,
     role_session_name: String,
     source_credentials: Credentials,
-) -> Result<Credentials, Error> {
+) -> Result<CredentialsSnapshot, Error> {
     use std::io::Read as _;
 
     let endpoint = sts_regional_endpoint(&region)?;
@@ -138,7 +139,8 @@ pub(crate) fn assume_role_blocking(
 }
 
 #[cfg(feature = "async")]
-pub(crate) async fn assume_role_with_web_identity_env_async() -> Result<Credentials, Error> {
+pub(crate) async fn assume_role_with_web_identity_env_async() -> Result<CredentialsSnapshot, Error>
+{
     use std::time::Duration;
 
     let (role_arn, session_name, token) = web_identity_env()?;
@@ -185,7 +187,7 @@ pub(crate) async fn assume_role_with_web_identity_env_async() -> Result<Credenti
 }
 
 #[cfg(feature = "blocking")]
-pub(crate) fn assume_role_with_web_identity_env_blocking() -> Result<Credentials, Error> {
+pub(crate) fn assume_role_with_web_identity_env_blocking() -> Result<CredentialsSnapshot, Error> {
     use std::io::Read as _;
 
     let (role_arn, session_name, token) = web_identity_env()?;
@@ -278,7 +280,16 @@ fn sts_api_error(status: StatusCode, body: &str) -> Error {
     }
 }
 
-fn parse_assume_role_response(body: &str) -> Result<Credentials, Error> {
+fn parse_expiration(value: &str) -> Result<OffsetDateTime, Error> {
+    OffsetDateTime::parse(value, &Rfc3339).map_err(|e| {
+        Error::decode(
+            "failed to parse credentials expiration timestamp",
+            Some(Box::new(e)),
+        )
+    })
+}
+
+fn parse_assume_role_response(body: &str) -> Result<CredentialsSnapshot, Error> {
     #[derive(serde::Deserialize)]
     struct XmlAssumeRoleResponse {
         #[serde(rename = "AssumeRoleResult")]
@@ -295,6 +306,8 @@ fn parse_assume_role_response(body: &str) -> Result<Credentials, Error> {
     struct XmlStsCredentials {
         #[serde(rename = "AccessKeyId")]
         access_key_id: String,
+        #[serde(rename = "Expiration")]
+        expiration: String,
         #[serde(rename = "SecretAccessKey")]
         secret_access_key: String,
         #[serde(rename = "SessionToken")]
@@ -309,10 +322,11 @@ fn parse_assume_role_response(body: &str) -> Result<Credentials, Error> {
         parsed.result.credentials.secret_access_key,
     )?;
     creds = creds.with_session_token(parsed.result.credentials.session_token)?;
-    Ok(creds)
+    let expires_at = parse_expiration(parsed.result.credentials.expiration.trim())?;
+    Ok(CredentialsSnapshot::new(creds).with_expires_at(expires_at))
 }
 
-fn parse_assume_role_with_web_identity_response(body: &str) -> Result<Credentials, Error> {
+fn parse_assume_role_with_web_identity_response(body: &str) -> Result<CredentialsSnapshot, Error> {
     #[derive(serde::Deserialize)]
     struct XmlResponse {
         #[serde(rename = "AssumeRoleWithWebIdentityResult")]
@@ -329,6 +343,8 @@ fn parse_assume_role_with_web_identity_response(body: &str) -> Result<Credential
     struct XmlStsCredentials {
         #[serde(rename = "AccessKeyId")]
         access_key_id: String,
+        #[serde(rename = "Expiration")]
+        expiration: String,
         #[serde(rename = "SecretAccessKey")]
         secret_access_key: String,
         #[serde(rename = "SessionToken")]
@@ -347,7 +363,8 @@ fn parse_assume_role_with_web_identity_response(body: &str) -> Result<Credential
         parsed.result.credentials.secret_access_key,
     )?;
     creds = creds.with_session_token(parsed.result.credentials.session_token)?;
-    Ok(creds)
+    let expires_at = parse_expiration(parsed.result.credentials.expiration.trim())?;
+    Ok(CredentialsSnapshot::new(creds).with_expires_at(expires_at))
 }
 
 #[cfg(test)]
@@ -370,41 +387,53 @@ mod tests {
     #[test]
     fn parses_assume_role_response() {
         let xml = r#"
-<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
-  <AssumeRoleResult>
-    <Credentials>
-      <AccessKeyId>AKIA_TEST</AccessKeyId>
-      <SecretAccessKey>SECRET_TEST</SecretAccessKey>
-      <SessionToken>TOKEN_TEST</SessionToken>
-    </Credentials>
-  </AssumeRoleResult>
-</AssumeRoleResponse>
-"#;
+ <AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
+   <AssumeRoleResult>
+     <Credentials>
+       <AccessKeyId>AKIA_TEST</AccessKeyId>
+       <Expiration>2020-01-01T00:00:00Z</Expiration>
+       <SecretAccessKey>SECRET_TEST</SecretAccessKey>
+       <SessionToken>TOKEN_TEST</SessionToken>
+     </Credentials>
+   </AssumeRoleResult>
+ </AssumeRoleResponse>
+ "#;
 
-        let creds = parse_assume_role_response(xml).unwrap();
+        let snapshot = parse_assume_role_response(xml).unwrap();
+        let creds = snapshot.credentials();
         assert_eq!(creds.access_key_id, "AKIA_TEST");
         assert_eq!(creds.secret_access_key, "SECRET_TEST");
         assert_eq!(creds.session_token.as_deref(), Some("TOKEN_TEST"));
+        assert_eq!(
+            snapshot.expires_at(),
+            Some(parse_expiration("2020-01-01T00:00:00Z").unwrap())
+        );
     }
 
     #[test]
     fn parses_assume_role_with_web_identity_response() {
         let xml = r#"
-<AssumeRoleWithWebIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
-  <AssumeRoleWithWebIdentityResult>
-    <Credentials>
-      <AccessKeyId>AKIA_TEST</AccessKeyId>
-      <SecretAccessKey>SECRET_TEST</SecretAccessKey>
-      <SessionToken>TOKEN_TEST</SessionToken>
-    </Credentials>
-  </AssumeRoleWithWebIdentityResult>
-</AssumeRoleWithWebIdentityResponse>
-"#;
+ <AssumeRoleWithWebIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
+   <AssumeRoleWithWebIdentityResult>
+     <Credentials>
+       <AccessKeyId>AKIA_TEST</AccessKeyId>
+       <Expiration>2020-01-01T00:00:00Z</Expiration>
+       <SecretAccessKey>SECRET_TEST</SecretAccessKey>
+       <SessionToken>TOKEN_TEST</SessionToken>
+     </Credentials>
+   </AssumeRoleWithWebIdentityResult>
+ </AssumeRoleWithWebIdentityResponse>
+ "#;
 
-        let creds = parse_assume_role_with_web_identity_response(xml).unwrap();
+        let snapshot = parse_assume_role_with_web_identity_response(xml).unwrap();
+        let creds = snapshot.credentials();
         assert_eq!(creds.access_key_id, "AKIA_TEST");
         assert_eq!(creds.secret_access_key, "SECRET_TEST");
         assert_eq!(creds.session_token.as_deref(), Some("TOKEN_TEST"));
+        assert_eq!(
+            snapshot.expires_at(),
+            Some(parse_expiration("2020-01-01T00:00:00Z").unwrap())
+        );
     }
 
     #[test]

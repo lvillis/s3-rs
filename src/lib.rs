@@ -61,7 +61,10 @@ mod error;
 mod transport;
 mod util;
 
-pub use auth::{AddressingStyle, Auth, Credentials, Region};
+pub use auth::{
+    AddressingStyle, Auth, CachedProvider, Credentials, CredentialsProvider, CredentialsSnapshot,
+    DynCredentialsProvider, Region,
+};
 #[cfg(feature = "blocking")]
 pub use client::{BlockingClient, BlockingClientBuilder};
 #[cfg(feature = "async")]

@@ -1333,6 +1333,27 @@ impl PresignObjectRequest {
             headers,
         )
     }
+
+    pub async fn build_async(self) -> Result<PresignedRequest> {
+        let mut headers = self.headers;
+        for (name, value) in self.metadata {
+            let header_name = crate::util::redact::metadata_header_name(&name)?;
+            let value = HeaderValue::from_str(&value)
+                .map_err(|_| Error::invalid_config("invalid metadata header value"))?;
+            headers.insert(header_name, value);
+        }
+
+        self.client
+            .presign_async(
+                self.method,
+                &self.bucket,
+                &self.key,
+                self.expires_in,
+                self.query_params,
+                headers,
+            )
+            .await
+    }
 }
 
 pub struct PresignGetObjectRequest {
@@ -1383,6 +1404,27 @@ impl PresignGetObjectRequest {
             self.query_params,
             headers,
         )
+    }
+
+    pub async fn build_async(self) -> Result<PresignedRequest> {
+        let mut headers = self.headers;
+        for (name, value) in self.metadata {
+            let header_name = crate::util::redact::metadata_header_name(&name)?;
+            let value = HeaderValue::from_str(&value)
+                .map_err(|_| Error::invalid_config("invalid metadata header value"))?;
+            headers.insert(header_name, value);
+        }
+
+        self.client
+            .presign_async(
+                Method::GET,
+                &self.bucket,
+                &self.key,
+                self.expires_in,
+                self.query_params,
+                headers,
+            )
+            .await
     }
 }
 
@@ -1435,6 +1477,27 @@ impl PresignPutObjectRequest {
             headers,
         )
     }
+
+    pub async fn build_async(self) -> Result<PresignedRequest> {
+        let mut headers = self.headers;
+        for (name, value) in self.metadata {
+            let header_name = crate::util::redact::metadata_header_name(&name)?;
+            let value = HeaderValue::from_str(&value)
+                .map_err(|_| Error::invalid_config("invalid metadata header value"))?;
+            headers.insert(header_name, value);
+        }
+
+        self.client
+            .presign_async(
+                Method::PUT,
+                &self.bucket,
+                &self.key,
+                self.expires_in,
+                self.query_params,
+                headers,
+            )
+            .await
+    }
 }
 
 pub struct PresignHeadObjectRequest {
@@ -1472,6 +1535,19 @@ impl PresignHeadObjectRequest {
             self.headers,
         )
     }
+
+    pub async fn build_async(self) -> Result<PresignedRequest> {
+        self.client
+            .presign_async(
+                Method::HEAD,
+                &self.bucket,
+                &self.key,
+                self.expires_in,
+                self.query_params,
+                self.headers,
+            )
+            .await
+    }
 }
 
 pub struct PresignDeleteObjectRequest {
@@ -1508,5 +1584,18 @@ impl PresignDeleteObjectRequest {
             self.query_params,
             self.headers,
         )
+    }
+
+    pub async fn build_async(self) -> Result<PresignedRequest> {
+        self.client
+            .presign_async(
+                Method::DELETE,
+                &self.bucket,
+                &self.key,
+                self.expires_in,
+                self.query_params,
+                self.headers,
+            )
+            .await
     }
 }
