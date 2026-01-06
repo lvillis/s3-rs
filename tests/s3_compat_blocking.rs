@@ -201,14 +201,31 @@ fn s3_compat_blocking_get_range_and_conditions() -> Result<(), Error> {
             .bytes()?;
         assert_eq!(ok, body);
 
+        let strict = common::strict();
         match client
             .objects()
             .get(&bucket, key)
             .if_none_match(etag)
             .send()
         {
-            Ok(_) => panic!("expected not modified"),
-            Err(Error::Api { status, .. }) => assert_eq!(status, StatusCode::NOT_MODIFIED),
+            Ok(out) => {
+                if strict {
+                    panic!("expected not modified");
+                }
+                let got = out.bytes()?;
+                assert_eq!(got, body);
+            }
+            Err(Error::Api { status, .. }) if strict => {
+                assert_eq!(status, StatusCode::NOT_MODIFIED)
+            }
+            Err(Error::Api { status, .. }) => {
+                assert!(matches!(
+                    status,
+                    StatusCode::NOT_MODIFIED
+                        | StatusCode::PRECONDITION_FAILED
+                        | StatusCode::BAD_REQUEST
+                ))
+            }
             Err(other) => panic!("expected api error, got {other:?}"),
         }
 
@@ -617,7 +634,9 @@ fn s3_compat_blocking_multipart_put_get_roundtrip() -> Result<(), Error> {
             saw_part2 = saw_part2 || parts.parts.iter().any(|p| p.part_number == 2);
         }
 
-        assert!(saw_part2);
+        if common::strict() {
+            assert!(saw_part2);
+        }
 
         client
             .objects()

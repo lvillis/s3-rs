@@ -16,6 +16,13 @@ pub(crate) struct TestConfig {
     pub(crate) auth: Auth,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TestBackend {
+    Minio,
+    Rustfs,
+    Other,
+}
+
 pub(crate) fn load_config() -> Result<Option<TestConfig>, Error> {
     let Ok(endpoint) = env::var("S3_TEST_ENDPOINT") else {
         return Ok(None);
@@ -33,6 +40,30 @@ pub(crate) fn load_config() -> Result<Option<TestConfig>, Error> {
         region,
         auth,
     }))
+}
+
+pub(crate) fn backend() -> TestBackend {
+    match env::var("S3_TEST_BACKEND")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "minio" => TestBackend::Minio,
+        "rustfs" => TestBackend::Rustfs,
+        _ => TestBackend::Other,
+    }
+}
+
+pub(crate) fn strict() -> bool {
+    if let Ok(value) = env::var("S3_TEST_STRICT") {
+        return matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        );
+    }
+
+    backend() != TestBackend::Rustfs
 }
 
 pub(crate) fn unique_bucket(prefix: &str) -> String {

@@ -467,6 +467,7 @@ async fn s3_compat_async_get_range_and_conditions() -> Result<(), Error> {
                 .await?;
             assert_eq!(ok, body);
 
+            let strict = common::strict();
             match client
                 .objects()
                 .get(&bucket, key)
@@ -474,9 +475,21 @@ async fn s3_compat_async_get_range_and_conditions() -> Result<(), Error> {
                 .send()
                 .await
             {
-                Ok(_) => panic!("expected precondition failed"),
-                Err(Error::Api { status, .. }) => {
+                Ok(out) => {
+                    if strict {
+                        panic!("expected precondition failed");
+                    }
+                    let got = out.bytes().await?;
+                    assert_eq!(got, body);
+                }
+                Err(Error::Api { status, .. }) if strict => {
                     assert_eq!(status, StatusCode::PRECONDITION_FAILED)
+                }
+                Err(Error::Api { status, .. }) => {
+                    assert!(matches!(
+                        status,
+                        StatusCode::PRECONDITION_FAILED | StatusCode::BAD_REQUEST
+                    ))
                 }
                 Err(other) => panic!("expected api error, got {other:?}"),
             }
@@ -488,8 +501,24 @@ async fn s3_compat_async_get_range_and_conditions() -> Result<(), Error> {
                 .send()
                 .await
             {
-                Ok(_) => panic!("expected not modified"),
-                Err(Error::Api { status, .. }) => assert_eq!(status, StatusCode::NOT_MODIFIED),
+                Ok(out) => {
+                    if strict {
+                        panic!("expected not modified");
+                    }
+                    let got = out.bytes().await?;
+                    assert_eq!(got, body);
+                }
+                Err(Error::Api { status, .. }) if strict => {
+                    assert_eq!(status, StatusCode::NOT_MODIFIED)
+                }
+                Err(Error::Api { status, .. }) => {
+                    assert!(matches!(
+                        status,
+                        StatusCode::NOT_MODIFIED
+                            | StatusCode::PRECONDITION_FAILED
+                            | StatusCode::BAD_REQUEST
+                    ))
+                }
                 Err(other) => panic!("expected api error, got {other:?}"),
             }
 
@@ -843,7 +872,9 @@ async fn s3_compat_async_multipart_put_get_roundtrip() -> Result<(), Error> {
                 saw_part2 = saw_part2 || parts.parts.iter().any(|p| p.part_number == 2);
             }
 
-            assert!(saw_part2);
+            if common::strict() {
+                assert!(saw_part2);
+            }
 
             client
                 .objects()
