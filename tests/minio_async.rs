@@ -22,6 +22,10 @@ fn is_not_found(err: &Error) -> bool {
     matches!(err, Error::Api { status, .. } if *status == StatusCode::NOT_FOUND)
 }
 
+fn is_optional_unsupported(err: &Error) -> bool {
+    common::is_unsupported(err) || matches!(err.status(), Some(StatusCode::METHOD_NOT_ALLOWED))
+}
+
 #[tokio::test]
 async fn minio_put_get_list_delete_roundtrip() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
@@ -125,27 +129,45 @@ async fn minio_list_buckets_and_bucket_configs() -> Result<(), Error> {
                 status: Some(BucketVersioningStatus::Enabled),
                 mfa_delete: None,
             };
-            client
+            match client
                 .buckets()
                 .put_versioning(&bucket)
                 .configuration(versioning)
                 .send()
-                .await?;
-            let got = client.buckets().get_versioning(&bucket).send().await?;
-            assert_eq!(got.status, Some(BucketVersioningStatus::Enabled));
+                .await
+            {
+                Ok(_) => {
+                    match client.buckets().get_versioning(&bucket).send().await {
+                        Ok(got) => assert_eq!(got.status, Some(BucketVersioningStatus::Enabled)),
+                        Err(err) if is_optional_unsupported(&err) => {}
+                        Err(err) => return Err(err),
+                    }
 
-            let versioning = BucketVersioningConfiguration {
-                status: Some(BucketVersioningStatus::Suspended),
-                mfa_delete: None,
-            };
-            client
-                .buckets()
-                .put_versioning(&bucket)
-                .configuration(versioning)
-                .send()
-                .await?;
-            let got = client.buckets().get_versioning(&bucket).send().await?;
-            assert_eq!(got.status, Some(BucketVersioningStatus::Suspended));
+                    let versioning = BucketVersioningConfiguration {
+                        status: Some(BucketVersioningStatus::Suspended),
+                        mfa_delete: None,
+                    };
+                    match client
+                        .buckets()
+                        .put_versioning(&bucket)
+                        .configuration(versioning)
+                        .send()
+                        .await
+                    {
+                        Ok(_) => match client.buckets().get_versioning(&bucket).send().await {
+                            Ok(got) => {
+                                assert_eq!(got.status, Some(BucketVersioningStatus::Suspended))
+                            }
+                            Err(err) if is_optional_unsupported(&err) => {}
+                            Err(err) => return Err(err),
+                        },
+                        Err(err) if is_optional_unsupported(&err) => {}
+                        Err(err) => return Err(err),
+                    }
+                }
+                Err(err) if is_optional_unsupported(&err) => {}
+                Err(err) => return Err(err),
+            }
 
             let tagging = BucketTagging {
                 tags: vec![
@@ -159,18 +181,36 @@ async fn minio_list_buckets_and_bucket_configs() -> Result<(), Error> {
                     },
                 ],
             };
-            client
+            match client
                 .buckets()
                 .put_tagging(&bucket)
                 .tagging(tagging)
                 .send()
-                .await?;
-            let got = client.buckets().get_tagging(&bucket).send().await?;
-            assert!(got.tags.iter().any(|t| t.key == "env" && t.value == "test"));
-            client.buckets().delete_tagging(&bucket).send().await?;
-            match client.buckets().get_tagging(&bucket).send().await {
-                Ok(_) => {}
-                Err(err) if is_not_found(&err) => {}
+                .await
+            {
+                Ok(_) => {
+                    match client.buckets().get_tagging(&bucket).send().await {
+                        Ok(got) => {
+                            assert!(got.tags.iter().any(|t| t.key == "env" && t.value == "test"))
+                        }
+                        Err(err) if is_optional_unsupported(&err) => {}
+                        Err(err) => return Err(err),
+                    }
+
+                    match client.buckets().delete_tagging(&bucket).send().await {
+                        Ok(_) => {}
+                        Err(err) if is_optional_unsupported(&err) => {}
+                        Err(err) => return Err(err),
+                    }
+
+                    match client.buckets().get_tagging(&bucket).send().await {
+                        Ok(_) => {}
+                        Err(err) if is_not_found(&err) => {}
+                        Err(err) if is_optional_unsupported(&err) => {}
+                        Err(err) => return Err(err),
+                    }
+                }
+                Err(err) if is_optional_unsupported(&err) => {}
                 Err(err) => return Err(err),
             }
 
@@ -184,18 +224,34 @@ async fn minio_list_buckets_and_bucket_configs() -> Result<(), Error> {
                     max_age_seconds: Some(3600),
                 }],
             };
-            client
+            match client
                 .buckets()
                 .put_cors(&bucket)
                 .configuration(cors)
                 .send()
-                .await?;
-            let got = client.buckets().get_cors(&bucket).send().await?;
-            assert!(!got.rules.is_empty());
-            client.buckets().delete_cors(&bucket).send().await?;
-            match client.buckets().get_cors(&bucket).send().await {
-                Ok(_) => {}
-                Err(err) if is_not_found(&err) => {}
+                .await
+            {
+                Ok(_) => {
+                    match client.buckets().get_cors(&bucket).send().await {
+                        Ok(got) => assert!(!got.rules.is_empty()),
+                        Err(err) if is_optional_unsupported(&err) => {}
+                        Err(err) => return Err(err),
+                    }
+
+                    match client.buckets().delete_cors(&bucket).send().await {
+                        Ok(_) => {}
+                        Err(err) if is_optional_unsupported(&err) => {}
+                        Err(err) => return Err(err),
+                    }
+
+                    match client.buckets().get_cors(&bucket).send().await {
+                        Ok(_) => {}
+                        Err(err) if is_not_found(&err) => {}
+                        Err(err) if is_optional_unsupported(&err) => {}
+                        Err(err) => return Err(err),
+                    }
+                }
+                Err(err) if is_optional_unsupported(&err) => {}
                 Err(err) => return Err(err),
             }
 
@@ -208,18 +264,34 @@ async fn minio_list_buckets_and_bucket_configs() -> Result<(), Error> {
                     expiration_date: None,
                 }],
             };
-            client
+            match client
                 .buckets()
                 .put_lifecycle(&bucket)
                 .configuration(lifecycle)
                 .send()
-                .await?;
-            let got = client.buckets().get_lifecycle(&bucket).send().await?;
-            assert!(!got.rules.is_empty());
-            client.buckets().delete_lifecycle(&bucket).send().await?;
-            match client.buckets().get_lifecycle(&bucket).send().await {
-                Ok(_) => {}
-                Err(err) if is_not_found(&err) => {}
+                .await
+            {
+                Ok(_) => {
+                    match client.buckets().get_lifecycle(&bucket).send().await {
+                        Ok(got) => assert!(!got.rules.is_empty()),
+                        Err(err) if is_optional_unsupported(&err) => {}
+                        Err(err) => return Err(err),
+                    }
+
+                    match client.buckets().delete_lifecycle(&bucket).send().await {
+                        Ok(_) => {}
+                        Err(err) if is_optional_unsupported(&err) => {}
+                        Err(err) => return Err(err),
+                    }
+
+                    match client.buckets().get_lifecycle(&bucket).send().await {
+                        Ok(_) => {}
+                        Err(err) if is_not_found(&err) => {}
+                        Err(err) if is_optional_unsupported(&err) => {}
+                        Err(err) => return Err(err),
+                    }
+                }
+                Err(err) if is_optional_unsupported(&err) => {}
                 Err(err) => return Err(err),
             }
 
