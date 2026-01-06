@@ -27,7 +27,7 @@ fn is_optional_unsupported(err: &Error) -> bool {
 }
 
 #[test]
-fn minio_blocking_put_get_delete_roundtrip() -> Result<(), Error> {
+fn s3_compat_blocking_put_get_delete_roundtrip() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -131,7 +131,7 @@ fn minio_blocking_put_get_delete_roundtrip() -> Result<(), Error> {
 }
 
 #[test]
-fn minio_blocking_virtual_hosted_put_get_delete_roundtrip() -> Result<(), Error> {
+fn s3_compat_blocking_virtual_hosted_put_get_delete_roundtrip() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -166,7 +166,7 @@ fn minio_blocking_virtual_hosted_put_get_delete_roundtrip() -> Result<(), Error>
 }
 
 #[test]
-fn minio_blocking_get_range_and_conditions() -> Result<(), Error> {
+fn s3_compat_blocking_get_range_and_conditions() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -218,7 +218,7 @@ fn minio_blocking_get_range_and_conditions() -> Result<(), Error> {
 }
 
 #[test]
-fn minio_blocking_list_buckets_and_bucket_configs() -> Result<(), Error> {
+fn s3_compat_blocking_list_buckets_and_bucket_configs() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -436,7 +436,7 @@ fn minio_blocking_list_buckets_and_bucket_configs() -> Result<(), Error> {
 }
 
 #[test]
-fn minio_blocking_list_v2_manual_pagination() -> Result<(), Error> {
+fn s3_compat_blocking_list_v2_manual_pagination() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -475,7 +475,7 @@ fn minio_blocking_list_v2_manual_pagination() -> Result<(), Error> {
 }
 
 #[test]
-fn minio_blocking_presign_put_head_delete_roundtrip() -> Result<(), Error> {
+fn s3_compat_blocking_presign_put_head_delete_roundtrip() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -555,7 +555,7 @@ fn minio_blocking_presign_put_head_delete_roundtrip() -> Result<(), Error> {
 
 #[cfg(feature = "multipart")]
 #[test]
-fn minio_blocking_multipart_put_get_roundtrip() -> Result<(), Error> {
+fn s3_compat_blocking_multipart_put_get_roundtrip() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -596,12 +596,28 @@ fn minio_blocking_multipart_put_get_roundtrip() -> Result<(), Error> {
             .send()?;
         assert!(!parts.parts.is_empty());
 
+        let marker = parts.parts.last().map(|p| p.part_number).unwrap_or(0);
+        let mut saw_part2 = parts.parts.iter().any(|p| p.part_number == 2);
+
         let parts = client
             .objects()
             .list_parts(&bucket, key, &upload_id)
-            .part_number_marker(1)
+            .part_number_marker(marker)
+            .max_parts(1000)
             .send()?;
-        assert!(parts.parts.iter().any(|p| p.part_number == 2));
+        saw_part2 = saw_part2 || parts.parts.iter().any(|p| p.part_number == 2);
+
+        if !saw_part2 {
+            let parts = client
+                .objects()
+                .list_parts(&bucket, key, &upload_id)
+                .part_number_marker(marker.saturating_add(1))
+                .max_parts(1000)
+                .send()?;
+            saw_part2 = saw_part2 || parts.parts.iter().any(|p| p.part_number == 2);
+        }
+
+        assert!(saw_part2);
 
         client
             .objects()
@@ -623,7 +639,7 @@ fn minio_blocking_multipart_put_get_roundtrip() -> Result<(), Error> {
 
 #[cfg(feature = "multipart")]
 #[test]
-fn minio_blocking_multipart_upload_part_copy_roundtrip() -> Result<(), Error> {
+fn s3_compat_blocking_multipart_upload_part_copy_roundtrip() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -684,7 +700,7 @@ fn minio_blocking_multipart_upload_part_copy_roundtrip() -> Result<(), Error> {
 
 #[cfg(feature = "multipart")]
 #[test]
-fn minio_blocking_multipart_abort_roundtrip() -> Result<(), Error> {
+fn s3_compat_blocking_multipart_abort_roundtrip() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };

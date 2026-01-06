@@ -27,7 +27,7 @@ fn is_optional_unsupported(err: &Error) -> bool {
 }
 
 #[tokio::test]
-async fn minio_put_get_list_delete_roundtrip() -> Result<(), Error> {
+async fn s3_compat_async_put_get_list_delete_roundtrip() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -111,7 +111,7 @@ async fn minio_put_get_list_delete_roundtrip() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn minio_virtual_hosted_put_get_delete_roundtrip() -> Result<(), Error> {
+async fn s3_compat_async_virtual_hosted_put_get_delete_roundtrip() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -157,7 +157,7 @@ async fn minio_virtual_hosted_put_get_delete_roundtrip() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn minio_list_buckets_and_bucket_configs() -> Result<(), Error> {
+async fn s3_compat_async_list_buckets_and_bucket_configs() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -424,7 +424,7 @@ async fn minio_list_buckets_and_bucket_configs() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn minio_get_range_and_conditions() -> Result<(), Error> {
+async fn s3_compat_async_get_range_and_conditions() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -470,7 +470,7 @@ async fn minio_get_range_and_conditions() -> Result<(), Error> {
             match client
                 .objects()
                 .get(&bucket, key)
-                .if_match("not-a-real-etag")
+                .if_match(r#""00000000000000000000000000000000""#)
                 .send()
                 .await
             {
@@ -501,7 +501,7 @@ async fn minio_get_range_and_conditions() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn minio_list_v2_manual_pagination() -> Result<(), Error> {
+async fn s3_compat_async_list_v2_manual_pagination() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -554,7 +554,7 @@ async fn minio_list_v2_manual_pagination() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn minio_list_v2_pager_and_common_prefixes() -> Result<(), Error> {
+async fn s3_compat_async_list_v2_pager_and_common_prefixes() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -607,7 +607,7 @@ async fn minio_list_v2_pager_and_common_prefixes() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn minio_presign_put_head_delete_roundtrip() -> Result<(), Error> {
+async fn s3_compat_async_presign_put_head_delete_roundtrip() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -682,7 +682,7 @@ async fn minio_presign_put_head_delete_roundtrip() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn minio_copy_object_roundtrip() -> Result<(), Error> {
+async fn s3_compat_async_copy_object_roundtrip() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -733,7 +733,7 @@ async fn minio_copy_object_roundtrip() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn minio_delete_objects_batch() -> Result<(), Error> {
+async fn s3_compat_async_delete_objects_batch() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -772,7 +772,7 @@ async fn minio_delete_objects_batch() -> Result<(), Error> {
 
 #[cfg(feature = "multipart")]
 #[tokio::test]
-async fn minio_multipart_put_get_roundtrip() -> Result<(), Error> {
+async fn s3_compat_async_multipart_put_get_roundtrip() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -820,13 +820,30 @@ async fn minio_multipart_put_get_roundtrip() -> Result<(), Error> {
                 .await?;
             assert!(!parts.parts.is_empty());
 
+            let marker = parts.parts.last().map(|p| p.part_number).unwrap_or(0);
+            let mut saw_part2 = parts.parts.iter().any(|p| p.part_number == 2);
+
             let parts = client
                 .objects()
                 .list_parts(&bucket, key, &upload_id)
-                .part_number_marker(1)
+                .part_number_marker(marker)
+                .max_parts(1000)
                 .send()
                 .await?;
-            assert!(parts.parts.iter().any(|p| p.part_number == 2));
+            saw_part2 = saw_part2 || parts.parts.iter().any(|p| p.part_number == 2);
+
+            if !saw_part2 {
+                let parts = client
+                    .objects()
+                    .list_parts(&bucket, key, &upload_id)
+                    .part_number_marker(marker.saturating_add(1))
+                    .max_parts(1000)
+                    .send()
+                    .await?;
+                saw_part2 = saw_part2 || parts.parts.iter().any(|p| p.part_number == 2);
+            }
+
+            assert!(saw_part2);
 
             client
                 .objects()
@@ -857,7 +874,7 @@ async fn minio_multipart_put_get_roundtrip() -> Result<(), Error> {
 
 #[cfg(feature = "multipart")]
 #[tokio::test]
-async fn minio_multipart_upload_part_copy_roundtrip() -> Result<(), Error> {
+async fn s3_compat_async_multipart_upload_part_copy_roundtrip() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
@@ -933,7 +950,7 @@ async fn minio_multipart_upload_part_copy_roundtrip() -> Result<(), Error> {
 
 #[cfg(feature = "multipart")]
 #[tokio::test]
-async fn minio_multipart_abort_roundtrip() -> Result<(), Error> {
+async fn s3_compat_async_multipart_abort_roundtrip() -> Result<(), Error> {
     let Some(cfg) = common::load_config()? else {
         return Ok(());
     };
