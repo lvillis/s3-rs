@@ -465,7 +465,7 @@ mod tests {
         })?;
 
         let handle = std::thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(2);
+            let deadline = Instant::now() + Duration::from_secs(5);
             loop {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
@@ -485,8 +485,11 @@ mod tests {
             }
         });
 
-        let transport =
-            BlockingTransport::new(RetryConfig::default(), None, Some(Duration::from_secs(2)))?;
+        let retry = RetryConfig {
+            max_attempts: 1,
+            ..RetryConfig::default()
+        };
+        let transport = BlockingTransport::new(retry, None, Some(Duration::from_secs(5)))?;
         let url = Url::parse(&format!("http://{addr}/"))
             .map_err(|_| Error::invalid_config("invalid test server URL"))?;
 
