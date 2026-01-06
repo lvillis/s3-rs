@@ -107,6 +107,7 @@ jobs:
             -p 9000:9000 -p 9001:9001 \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
+            -e MINIO_DOMAIN=lvh.me \
             minio/minio:latest server /data --console-address ":9001"
       - name: Wait for MinIO
         run: |
