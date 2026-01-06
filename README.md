@@ -4,7 +4,7 @@
 [![docs.rs](https://docs.rs/s3/badge.svg)](https://docs.rs/s3)
 [![CI](https://github.com/lvillis/s3-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/lvillis/s3-rs/actions/workflows/ci.yml)
 
-A lean S3 client for Rust.
+A lean, modern, unofficial S3-compatible client for Rust.
 
 ## Quick start (async)
 

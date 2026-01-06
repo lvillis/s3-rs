@@ -305,13 +305,16 @@ impl BlockingCreateBucketRequest {
         let mut headers = HeaderMap::new();
         let body = match self.location_constraint {
             Some(region) => {
+                let body = crate::util::xml::encode_create_bucket_configuration(&region)?;
                 headers.insert(
                     http::header::CONTENT_TYPE,
                     HeaderValue::from_static("application/xml"),
                 );
-                BlockingBody::Bytes(crate::util::xml::encode_create_bucket_configuration(
-                    &region,
-                )?)
+                headers.insert(
+                    http::header::HeaderName::from_static("content-md5"),
+                    crate::util::md5::content_md5_header_value(body.as_ref())?,
+                );
+                BlockingBody::Bytes(body)
             }
             None => BlockingBody::Empty,
         };
@@ -408,6 +411,10 @@ impl BlockingPutBucketVersioningRequest {
             http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/xml"),
         );
+        headers.insert(
+            http::header::HeaderName::from_static("content-md5"),
+            crate::util::md5::content_md5_header_value(body.as_ref())?,
+        );
 
         let resp = self.client.execute(
             Method::PUT,
@@ -474,6 +481,10 @@ impl BlockingPutBucketLifecycleRequest {
         headers.insert(
             http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/xml"),
+        );
+        headers.insert(
+            http::header::HeaderName::from_static("content-md5"),
+            crate::util::md5::content_md5_header_value(body.as_ref())?,
         );
 
         let resp = self.client.execute(
@@ -568,6 +579,10 @@ impl BlockingPutBucketCorsRequest {
             http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/xml"),
         );
+        headers.insert(
+            http::header::HeaderName::from_static("content-md5"),
+            crate::util::md5::content_md5_header_value(body.as_ref())?,
+        );
 
         let resp = self.client.execute(
             Method::PUT,
@@ -660,6 +675,10 @@ impl BlockingPutBucketTaggingRequest {
         headers.insert(
             http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/xml"),
+        );
+        headers.insert(
+            http::header::HeaderName::from_static("content-md5"),
+            crate::util::md5::content_md5_header_value(body.as_ref())?,
         );
 
         let resp = self.client.execute(
@@ -754,6 +773,10 @@ impl BlockingPutBucketEncryptionRequest {
             http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/xml"),
         );
+        headers.insert(
+            http::header::HeaderName::from_static("content-md5"),
+            crate::util::md5::content_md5_header_value(body.as_ref())?,
+        );
 
         let resp = self.client.execute(
             Method::PUT,
@@ -846,6 +869,10 @@ impl BlockingPutBucketPublicAccessBlockRequest {
         headers.insert(
             http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/xml"),
+        );
+        headers.insert(
+            http::header::HeaderName::from_static("content-md5"),
+            crate::util::md5::content_md5_header_value(body.as_ref())?,
         );
 
         let resp = self.client.execute(
@@ -953,6 +980,10 @@ impl BlockingPutBucketConfigRawRequest {
         headers.insert(
             http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/xml"),
+        );
+        headers.insert(
+            http::header::HeaderName::from_static("content-md5"),
+            crate::util::md5::content_md5_header_value(self.body.as_ref())?,
         );
 
         let resp = self.client.execute(

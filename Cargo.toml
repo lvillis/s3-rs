@@ -1,7 +1,7 @@
 [package]
 name = "s3"
 version = "0.1.1"
-description = "A lean S3 client for Rust."
+description = "A lean, modern, unofficial S3-compatible client for Rust."
 readme = "README.md"
 repository = "https://github.com/lvillis/s3-rs"
 homepage = "https://github.com/lvillis/s3-rs"
