@@ -136,7 +136,7 @@ fn minio_blocking_virtual_hosted_put_get_delete_roundtrip() -> Result<(), Error>
         return Ok(());
     };
 
-    let Some(endpoint) = common::lvh_endpoint(&cfg.endpoint)? else {
+    let Some(endpoint) = common::virtual_hosted_endpoint(&cfg.endpoint)? else {
         return Ok(());
     };
 

@@ -223,6 +223,7 @@ impl AsyncTransport {
                                 )
                                 .increment(1);
                                 let delay = retry_delay_from_response(self.retry, attempt, &resp);
+                                drop(resp);
                                 tokio::time::sleep(delay).await;
                                 continue;
                             }
@@ -429,8 +430,23 @@ mod tests {
                     match listener.accept() {
                         Ok((mut stream, _)) => {
                             let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+                            let mut request = Vec::new();
                             let mut buf = [0u8; 1024];
-                            let _ = stream.read(&mut buf);
+                            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                                match stream.read(&mut buf) {
+                                    Ok(0) => break,
+                                    Ok(n) => {
+                                        request.extend_from_slice(&buf[..n]);
+                                        if request.len() > 64 * 1024 {
+                                            break;
+                                        }
+                                    }
+                                    Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                                        break;
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
                             let _ = stream.write_all(&response);
                             let _ = stream.flush();
                             hits_thread.fetch_add(1, Ordering::SeqCst);

@@ -1,5 +1,6 @@
 use std::{
     env,
+    net::IpAddr,
     net::ToSocketAddrs as _,
     sync::atomic::{AtomicUsize, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -43,16 +44,26 @@ pub(crate) fn unique_bucket(prefix: &str) -> String {
     format!("{prefix}{now}-{n}")
 }
 
-pub(crate) fn lvh_endpoint(original: &str) -> Result<Option<String>, Error> {
+pub(crate) fn virtual_hosted_endpoint(original: &str) -> Result<Option<String>, Error> {
     let mut url = url::Url::parse(original)
         .map_err(|_| Error::invalid_config("S3_TEST_ENDPOINT must be a valid URL"))?;
 
-    let port = url.port_or_known_default().unwrap_or(80);
-    if format!("test.lvh.me:{port}").to_socket_addrs().is_err() {
+    let Some(host) = url.host_str() else {
+        return Err(Error::invalid_config("S3_TEST_ENDPOINT must include host"));
+    };
+
+    let is_loopback =
+        host == "localhost" || host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback());
+    if !is_loopback {
         return Ok(None);
     }
 
-    url.set_host(Some("lvh.me"))
+    let port = url.port_or_known_default().unwrap_or(80);
+    if format!("test.localhost:{port}").to_socket_addrs().is_err() {
+        return Ok(None);
+    }
+
+    url.set_host(Some("localhost"))
         .map_err(|_| Error::invalid_config("failed to build virtual-hosted endpoint"))?;
 
     Ok(Some(url.to_string()))
