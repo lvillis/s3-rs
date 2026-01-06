@@ -52,5 +52,6 @@ fn demo() -> Result<(), s3::Error> {
 
 - `async` (default), `blocking`
 - `multipart`, `checksums`, `tracing`, `metrics`
+- `providers` (endpoint presets)
 
 MSRV: Rust `1.92`.

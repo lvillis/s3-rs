@@ -106,6 +106,7 @@ metrics = ["dep:metrics"]
 # Optional capabilities
 checksums = ["dep:crc", "dep:sha1"]
 multipart = []
+providers = []
 credentials-profile = []
 credentials-imds = ["dep:serde_json"]
 credentials-sts = []

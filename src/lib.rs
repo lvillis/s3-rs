@@ -50,6 +50,8 @@
 compile_error!("Enable only one of: rustls, native-tls.");
 
 pub mod api;
+#[cfg(feature = "providers")]
+pub mod providers;
 pub mod types;
 
 mod auth;
