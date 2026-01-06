@@ -54,4 +54,8 @@ fn demo() -> Result<(), s3::Error> {
 - `multipart`, `checksums`, `tracing`, `metrics`
 - `providers` (endpoint presets)
 
+## Examples
+
+See `examples/README.md`.
+
 MSRV: Rust `1.92`.
