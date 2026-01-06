@@ -17,6 +17,7 @@ include = [
   "LICENSE",
   "CHANGELOG.md",
   "src/**",
+  "benches/**",
   "examples/**",
   "tests/**"
 ]
@@ -29,6 +30,7 @@ resolver = "3"
 base64 = { version = "0.22.1", default-features = false, features = ["std"] }
 bytes = { version = "1.11.0", default-features = false, features = ["std"] }
 crc = { version = "3.4.0", default-features = false }
+criterion = { version = "0.8.1" }
 futures-core = { version = "0.3.31", default-features = false, features = ["std"] }
 futures-io = { version = "0.3.31", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.31", default-features = false, features = ["std", "io"] }
@@ -39,7 +41,7 @@ md-5 = { version = "0.10.6", default-features = false, features = ["std"] }
 metrics = { version = "0.24.3", default-features = false }
 quick-xml = { version = "0.38.4", default-features = false, features = ["serialize"] }
 reqwest = { version = "0.13.1", default-features = false, features = ["stream"] }
-rustls = { version = "0.23.35", default-features = false, features = ["std", "tls12", "ring"] }
+rustls = { version = "0.23.36", default-features = false, features = ["std", "tls12", "ring"] }
 serde = { version = "1.0.228", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0.148", default-features = false, features = ["std"] }
 sha1 = { version = "0.10.6", default-features = false, features = ["std"] }
@@ -48,7 +50,7 @@ time = { version = "0.3.44", default-features = false, features = ["std"] }
 tokio = { version = "1.49.0", default-features = false, features = ["time"] }
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 ureq = { version = "3.1.4", default-features = false }
-url = { version = "2.5.7", default-features = false, features = ["std"] }
+url = { version = "2.5.8", default-features = false, features = ["std"] }
 
 [dependencies]
 base64 = { workspace = true }
@@ -78,6 +80,7 @@ tracing = { workspace = true, optional = true }
 ureq = { workspace = true, optional = true }
 
 [dev-dependencies]
+criterion = { workspace = true }
 tokio = { workspace = true, default-features = false, features = ["macros", "rt-multi-thread", "time"] }
 
 [features]
@@ -109,6 +112,10 @@ native-tls = ["reqwest?/native-tls", "ureq?/native-tls"]
 
 # Optional escape hatch
 unstable-raw = []
+
+[[bench]]
+name = "bench"
+harness = false
 
 [package.metadata.release]
 tag-prefix = ""
