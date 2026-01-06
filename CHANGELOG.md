@@ -1,3 +1,13 @@
+## [0.1.5] - 2026-01-06
+
+### 🧪 Testing
+
+- *(store)* Rename and stabilize s3_compat integration tests
+- *(store)* Make s3_compat tests strictness configurable
+
+### ⚙️ Miscellaneous Tasks
+
+- Add rustfs integration tests
 ## [0.1.4] - 2026-01-06
 
 ### 🧪 Testing
@@ -8,6 +18,7 @@
 
 - *(ci)* Update ci.yaml
 - *(ci)* Set MINIO_DOMAIN for vhost tests
+- Release s3 version 0.1.4
 ## [0.1.3] - 2026-01-06
 
 ### 🚀 Features
