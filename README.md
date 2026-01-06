@@ -2,7 +2,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/s3.svg)](https://crates.io/crates/s3)
 [![docs.rs](https://docs.rs/s3/badge.svg)](https://docs.rs/s3)
-[![CI](https://github.com/lvillis/s3-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/lvillis/s3-rs/actions/workflows/ci.yml)
+[![CI](https://github.com/lvillis/s3-rs/actions/workflows/ci.yaml/badge.svg)](https://github.com/lvillis/s3-rs/actions/workflows/ci.yaml)
 
 A lean, modern, unofficial S3-compatible client for Rust.
 
