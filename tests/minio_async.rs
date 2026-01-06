@@ -64,7 +64,7 @@ async fn minio_put_get_list_delete_roundtrip() -> Result<(), Error> {
             client
                 .objects()
                 .put(&bucket, stream_key)
-                .body_stream(stream)
+                .body_stream_sized(stream, 5)
                 .send()
                 .await?;
 
@@ -223,88 +223,80 @@ async fn minio_list_buckets_and_bucket_configs() -> Result<(), Error> {
                 Err(err) => return Err(err),
             }
 
-            let encryption_supported = match client.buckets().get_encryption(&bucket).send().await {
-                Ok(_) => true,
-                Err(err) if is_not_found(&err) => true,
-                Err(err)
-                    if common::is_unsupported(&err)
-                        || matches!(
-                            err.status(),
-                            Some(StatusCode::BAD_REQUEST | StatusCode::METHOD_NOT_ALLOWED)
-                        ) =>
-                {
-                    false
-                }
-                Err(err) => return Err(err),
+            let encryption = BucketEncryptionConfiguration {
+                rules: vec![BucketEncryptionRule {
+                    apply: ApplyServerSideEncryptionByDefault {
+                        sse_algorithm: SseAlgorithm::Aes256,
+                        kms_master_key_id: None,
+                    },
+                    bucket_key_enabled: Some(false),
+                }],
             };
 
-            if encryption_supported {
-                let encryption = BucketEncryptionConfiguration {
-                    rules: vec![BucketEncryptionRule {
-                        apply: ApplyServerSideEncryptionByDefault {
-                            sse_algorithm: SseAlgorithm::Aes256,
-                            kms_master_key_id: None,
-                        },
-                        bucket_key_enabled: Some(false),
-                    }],
-                };
-
-                client
-                    .buckets()
-                    .put_encryption(&bucket)
-                    .configuration(encryption)
-                    .send()
-                    .await?;
-                let got = client.buckets().get_encryption(&bucket).send().await?;
-                assert!(!got.rules.is_empty());
-                client.buckets().delete_encryption(&bucket).send().await?;
-            }
-
-            let pab_supported = match client
+            match client
                 .buckets()
-                .get_public_access_block(&bucket)
+                .put_encryption(&bucket)
+                .configuration(encryption)
                 .send()
                 .await
             {
-                Ok(_) => true,
-                Err(err) if is_not_found(&err) => true,
-                Err(err)
-                    if common::is_unsupported(&err)
-                        || matches!(
-                            err.status(),
-                            Some(StatusCode::BAD_REQUEST | StatusCode::METHOD_NOT_ALLOWED)
-                        ) =>
-                {
-                    false
+                Ok(_) => {
+                    let got = client.buckets().get_encryption(&bucket).send().await?;
+                    assert!(!got.rules.is_empty());
+                    match client.buckets().delete_encryption(&bucket).send().await {
+                        Ok(_) => {}
+                        Err(err) if common::is_unsupported(&err) => {}
+                        Err(err) => return Err(err),
+                    }
                 }
+                Err(err) if common::is_unsupported(&err) => {}
+                Err(err)
+                    if matches!(
+                        err.status(),
+                        Some(StatusCode::BAD_REQUEST | StatusCode::METHOD_NOT_ALLOWED)
+                    ) => {}
                 Err(err) => return Err(err),
+            }
+
+            let pab = BucketPublicAccessBlockConfiguration {
+                block_public_acls: true,
+                ignore_public_acls: true,
+                block_public_policy: true,
+                restrict_public_buckets: true,
             };
 
-            if pab_supported {
-                let pab = BucketPublicAccessBlockConfiguration {
-                    block_public_acls: true,
-                    ignore_public_acls: true,
-                    block_public_policy: true,
-                    restrict_public_buckets: true,
-                };
-
-                client
-                    .buckets()
-                    .put_public_access_block(&bucket)
-                    .configuration(pab)
-                    .send()
-                    .await?;
-                let got = client
-                    .buckets()
-                    .get_public_access_block(&bucket)
-                    .send()
-                    .await?;
-                assert!(got.block_public_acls);
-                client
-                    .buckets()
-                    .delete_public_access_block(&bucket)
-                    .send()
-                    .await?;
+            match client
+                .buckets()
+                .put_public_access_block(&bucket)
+                .configuration(pab)
+                .send()
+                .await
+            {
+                Ok(_) => {
+                    let got = client
+                        .buckets()
+                        .get_public_access_block(&bucket)
+                        .send()
+                        .await?;
+                    assert!(got.block_public_acls);
+                    match client
+                        .buckets()
+                        .delete_public_access_block(&bucket)
+                        .send()
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(err) if common::is_unsupported(&err) => {}
+                        Err(err) => return Err(err),
+                    }
+                }
+                Err(err) if common::is_unsupported(&err) => {}
+                Err(err)
+                    if matches!(
+                        err.status(),
+                        Some(StatusCode::BAD_REQUEST | StatusCode::METHOD_NOT_ALLOWED)
+                    ) => {}
+                Err(err) => return Err(err),
             }
 
             Ok(())

@@ -63,6 +63,7 @@ impl ObjectsService {
             content_encoding: None,
             content_language: None,
             expires: None,
+            content_length: None,
             #[cfg(feature = "checksums")]
             checksum: None,
             metadata: Vec::new(),
@@ -453,6 +454,7 @@ pub struct PutObjectRequest {
     content_encoding: Option<String>,
     content_language: Option<String>,
     expires: Option<String>,
+    content_length: Option<u64>,
     #[cfg(feature = "checksums")]
     checksum: Option<crate::types::Checksum>,
     metadata: Vec<(String, String)>,
@@ -490,6 +492,11 @@ impl PutObjectRequest {
         self
     }
 
+    pub fn content_length(mut self, value: u64) -> Self {
+        self.content_length = Some(value);
+        self
+    }
+
     pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.push((key.into(), value.into()));
         self
@@ -510,8 +517,19 @@ impl PutObjectRequest {
     where
         S: Stream<Item = std::result::Result<Bytes, io::Error>> + Send + 'static,
     {
-        self.body = AsyncBody::Stream(Box::pin(stream));
+        self.body = AsyncBody::Stream {
+            stream: Box::pin(stream),
+            content_length: None,
+        };
         self
+    }
+
+    pub fn body_stream_sized<S>(mut self, stream: S, content_length: u64) -> Self
+    where
+        S: Stream<Item = std::result::Result<Bytes, io::Error>> + Send + 'static,
+    {
+        self.content_length = Some(content_length);
+        self.body_stream(stream)
     }
 
     pub async fn send(self) -> Result<PutObjectOutput> {
@@ -559,6 +577,24 @@ impl PutObjectRequest {
             checksum.apply(&mut headers)?;
         }
 
+        let body = match self.body {
+            AsyncBody::Stream { stream, .. } => {
+                let content_length = self.content_length.ok_or_else(|| {
+                    Error::invalid_config("streaming put requires content_length")
+                })?;
+                headers.insert(
+                    http::header::CONTENT_LENGTH,
+                    HeaderValue::from_str(&content_length.to_string())
+                        .map_err(|_| Error::invalid_config("invalid Content-Length header"))?,
+                );
+                AsyncBody::Stream {
+                    stream,
+                    content_length: Some(content_length),
+                }
+            }
+            other => other,
+        };
+
         let resp = self
             .client
             .execute(
@@ -567,7 +603,7 @@ impl PutObjectRequest {
                 Some(&self.key),
                 Vec::new(),
                 headers,
-                self.body,
+                body,
             )
             .await?;
 
@@ -859,7 +895,10 @@ impl UploadPartRequest {
     where
         S: Stream<Item = std::result::Result<Bytes, io::Error>> + Send + 'static,
     {
-        self.body = AsyncBody::Stream(Box::pin(stream));
+        self.body = AsyncBody::Stream {
+            stream: Box::pin(stream),
+            content_length: None,
+        };
         self
     }
 

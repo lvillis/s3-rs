@@ -80,7 +80,7 @@ impl Client {
             let payload_hash = match &body {
                 AsyncBody::Empty => util::signing::payload_hash_empty(),
                 AsyncBody::Bytes(b) => util::signing::payload_hash_bytes(b),
-                AsyncBody::Stream(_) => util::signing::UNSIGNED_PAYLOAD.to_string(),
+                AsyncBody::Stream { .. } => util::signing::UNSIGNED_PAYLOAD.to_string(),
             };
 
             util::signing::sign_headers(

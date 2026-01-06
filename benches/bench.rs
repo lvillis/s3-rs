@@ -1,6 +1,6 @@
-use std::time::Duration;
+use std::{hint::black_box, time::Duration};
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 #[cfg(feature = "async")]
 fn async_client(addressing: s3::AddressingStyle) -> s3::Client {

@@ -1,4 +1,10 @@
-use std::{io, pin::Pin, time::Duration};
+use std::{
+    io,
+    pin::Pin,
+    sync::Mutex,
+    task::{Context, Poll},
+    time::Duration,
+};
 
 #[cfg(feature = "metrics")]
 use std::time::Instant;
@@ -6,6 +12,7 @@ use std::time::Instant;
 use bytes::Bytes;
 use futures_core::Stream;
 use http::{HeaderMap, Method, StatusCode};
+use http_body::{Body as HttpBody, Frame, SizeHint};
 use url::Url;
 
 use crate::{
@@ -13,10 +20,16 @@ use crate::{
     transport::{RetryConfig, backoff_delay},
 };
 
+type AsyncByteStream =
+    Pin<Box<dyn Stream<Item = std::result::Result<Bytes, io::Error>> + Send + 'static>>;
+
 pub(crate) enum AsyncBody {
     Empty,
     Bytes(Bytes),
-    Stream(Pin<Box<dyn Stream<Item = std::result::Result<Bytes, io::Error>> + Send + 'static>>),
+    Stream {
+        stream: AsyncByteStream,
+        content_length: Option<u64>,
+    },
 }
 
 impl AsyncBody {
@@ -28,8 +41,51 @@ impl AsyncBody {
         match self {
             Self::Empty => Some(Self::Empty),
             Self::Bytes(b) => Some(Self::Bytes(b.clone())),
-            Self::Stream(_) => None,
+            Self::Stream { .. } => None,
         }
+    }
+}
+
+struct SizedStreamBody {
+    stream: Mutex<AsyncByteStream>,
+    content_length: u64,
+}
+
+impl SizedStreamBody {
+    fn new(stream: AsyncByteStream, content_length: u64) -> Self {
+        Self {
+            stream: Mutex::new(stream),
+            content_length,
+        }
+    }
+}
+
+impl HttpBody for SizedStreamBody {
+    type Data = Bytes;
+    type Error = io::Error;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<std::result::Result<Frame<Self::Data>, Self::Error>>> {
+        let this = self.as_mut().get_mut();
+        let mut stream = match this.stream.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return Poll::Ready(Some(Err(io::Error::other("stream mutex poisoned"))));
+            }
+        };
+
+        match stream.as_mut().poll_next(cx) {
+            Poll::Ready(Some(Ok(chunk))) => Poll::Ready(Some(Ok(Frame::data(chunk)))),
+            Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(err))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        SizeHint::with_exact(self.content_length)
     }
 }
 
@@ -67,7 +123,7 @@ impl AsyncTransport {
         body: AsyncBody,
     ) -> Result<reqwest::Response> {
         match body {
-            AsyncBody::Stream(stream) => {
+            body @ AsyncBody::Stream { .. } => {
                 #[cfg(feature = "metrics")]
                 metrics::counter!("s3_http_attempts_total", "method" => method_label(&method))
                     .increment(1);
@@ -83,7 +139,7 @@ impl AsyncTransport {
                 #[cfg(feature = "metrics")]
                 let start = Instant::now();
 
-                let req = self.build_request(&method, url, headers, AsyncBody::Stream(stream))?;
+                let req = self.build_request(&method, url, headers, body)?;
                 match req.send().await {
                     Ok(resp) => {
                         #[cfg(feature = "metrics")]
@@ -220,7 +276,13 @@ impl AsyncTransport {
         req = match body {
             AsyncBody::Empty => req,
             AsyncBody::Bytes(b) => req.body(b),
-            AsyncBody::Stream(s) => req.body(reqwest::Body::wrap_stream(s)),
+            AsyncBody::Stream {
+                stream,
+                content_length,
+            } => match content_length {
+                Some(len) => req.body(reqwest::Body::wrap(SizedStreamBody::new(stream, len))),
+                None => req.body(reqwest::Body::wrap_stream(stream)),
+            },
         };
         Ok(req)
     }

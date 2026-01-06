@@ -37,6 +37,7 @@ futures-util = { version = "0.3.31", default-features = false, features = ["std"
 hex = { version = "0.4.3", default-features = false, features = ["std"] }
 hmac = { version = "0.12.1", default-features = false, features = ["std"] }
 http = { version = "1.4.0", default-features = false, features = ["std"] }
+http-body = { version = "1.0.1", default-features = false }
 md-5 = { version = "0.10.6", default-features = false, features = ["std"] }
 metrics = { version = "0.24.3", default-features = false }
 quick-xml = { version = "0.38.4", default-features = false, features = ["serialize"] }
@@ -59,6 +60,7 @@ crc = { workspace = true, optional = true }
 hex = { workspace = true }
 hmac = { workspace = true }
 http = { workspace = true }
+http-body = { workspace = true, optional = true }
 md-5 = { workspace = true }
 sha1 = { workspace = true, optional = true }
 sha2 = { workspace = true }
@@ -87,7 +89,14 @@ tokio = { workspace = true, default-features = false, features = ["macros", "rt-
 default = ["async", "rustls"]
 
 # Core modes
-async = ["dep:reqwest", "dep:futures-core", "dep:futures-io", "dep:futures-util", "dep:tokio"]
+async = [
+    "dep:reqwest",
+    "dep:futures-core",
+    "dep:futures-io",
+    "dep:futures-util",
+    "dep:tokio",
+    "dep:http-body",
+]
 blocking = ["dep:ureq"]
 
 # Observability
