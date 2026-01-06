@@ -1,3 +1,19 @@
+## [0.1.3] - 2026-01-06
+
+### 🚀 Features
+
+- *(providers)* Add rule-based presets and AwsRegion helpers
+- *(auth)* Add credential providers with cached auto-refresh
+
+### 🧪 Testing
+
+- Expand coverage for cached credentials, transport, and MinIO vhost
+
+### ⚙️ Miscellaneous Tasks
+
+- *(examples)* Add practical async/blocking usage examples
+- *(ci)* Update
+- *(examples)* Add more runnable usage guides
 ## [0.1.2] - 2026-01-06
 
 ### 🐛 Bug Fixes
@@ -13,6 +29,7 @@
 ### ⚙️ Miscellaneous Tasks
 
 - *(bench)* Add criterion microbench suite
+- Release s3 version 0.1.2
 ## [0.1.1] - 2026-01-05
 
 ### 🐛 Bug Fixes
