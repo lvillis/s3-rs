@@ -120,15 +120,16 @@ async fn minio_virtual_hosted_put_get_delete_roundtrip() -> Result<(), Error> {
         return Ok(());
     };
 
-    let client = s3::Client::builder(&endpoint)?
+    let bucket_client = common::build_async_client(&cfg, AddressingStyle::Path)?;
+    let vhost_client = s3::Client::builder(&endpoint)?
         .region(cfg.region.as_str())
         .auth(cfg.auth.clone())
         .addressing_style(AddressingStyle::VirtualHosted)
         .max_attempts(1)
         .build()?;
 
-    common::with_bucket_async(&client, "s3-it-vhost-", |bucket| {
-        let client = client.clone();
+    common::with_bucket_async(&bucket_client, "s3-it-vhost-", |bucket| {
+        let client = vhost_client.clone();
         async move {
             let key = "a+b.txt";
             let body = Bytes::from_static(b"hello");
