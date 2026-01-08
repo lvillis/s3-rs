@@ -1,3 +1,5 @@
+//! Async object operations.
+
 use std::{io, time::Duration};
 
 use bytes::Bytes;
@@ -21,6 +23,7 @@ use crate::types::{
     CreateMultipartUploadOutput, ListPartsOutput, UploadPartCopyOutput, UploadPartOutput,
 };
 
+/// Object operations service.
 #[derive(Clone)]
 pub struct ObjectsService {
     client: Client,
@@ -31,6 +34,7 @@ impl ObjectsService {
         Self { client }
     }
 
+    /// Starts a request to GET an object.
     pub fn get(&self, bucket: impl Into<String>, key: impl Into<String>) -> GetObjectRequest {
         GetObjectRequest {
             client: self.client.clone(),
@@ -44,6 +48,7 @@ impl ObjectsService {
         }
     }
 
+    /// Starts a request to HEAD an object.
     pub fn head(&self, bucket: impl Into<String>, key: impl Into<String>) -> HeadObjectRequest {
         HeadObjectRequest {
             client: self.client.clone(),
@@ -52,6 +57,7 @@ impl ObjectsService {
         }
     }
 
+    /// Starts a request to PUT an object.
     pub fn put(&self, bucket: impl Into<String>, key: impl Into<String>) -> PutObjectRequest {
         PutObjectRequest {
             client: self.client.clone(),
@@ -71,6 +77,7 @@ impl ObjectsService {
         }
     }
 
+    /// Starts a request to DELETE an object.
     pub fn delete(&self, bucket: impl Into<String>, key: impl Into<String>) -> DeleteObjectRequest {
         DeleteObjectRequest {
             client: self.client.clone(),
@@ -79,6 +86,7 @@ impl ObjectsService {
         }
     }
 
+    /// Starts a request to DELETE multiple objects.
     pub fn delete_objects(&self, bucket: impl Into<String>) -> DeleteObjectsRequest {
         DeleteObjectsRequest {
             client: self.client.clone(),
@@ -88,6 +96,7 @@ impl ObjectsService {
         }
     }
 
+    /// Starts a request to copy an object.
     pub fn copy(
         &self,
         source_bucket: impl Into<String>,
@@ -109,6 +118,7 @@ impl ObjectsService {
     }
 
     #[cfg(feature = "multipart")]
+    /// Starts a multipart upload.
     pub fn create_multipart_upload(
         &self,
         bucket: impl Into<String>,
@@ -124,6 +134,7 @@ impl ObjectsService {
     }
 
     #[cfg(feature = "multipart")]
+    /// Starts a request to upload a multipart part.
     pub fn upload_part(
         &self,
         bucket: impl Into<String>,
@@ -142,6 +153,7 @@ impl ObjectsService {
     }
 
     #[cfg(feature = "multipart")]
+    /// Starts a request to copy data into a multipart part.
     pub fn upload_part_copy(
         &self,
         source_bucket: impl Into<String>,
@@ -165,6 +177,7 @@ impl ObjectsService {
     }
 
     #[cfg(feature = "multipart")]
+    /// Starts a request to complete a multipart upload.
     pub fn complete_multipart_upload(
         &self,
         bucket: impl Into<String>,
@@ -181,6 +194,7 @@ impl ObjectsService {
     }
 
     #[cfg(feature = "multipart")]
+    /// Starts a request to abort a multipart upload.
     pub fn abort_multipart_upload(
         &self,
         bucket: impl Into<String>,
@@ -196,6 +210,7 @@ impl ObjectsService {
     }
 
     #[cfg(feature = "multipart")]
+    /// Starts a request to list multipart parts.
     pub fn list_parts(
         &self,
         bucket: impl Into<String>,
@@ -212,6 +227,7 @@ impl ObjectsService {
         }
     }
 
+    /// Starts a ListObjectsV2 request.
     pub fn list_v2(&self, bucket: impl Into<String>) -> ListObjectsV2Request {
         ListObjectsV2Request {
             client: self.client.clone(),
@@ -224,6 +240,7 @@ impl ObjectsService {
         }
     }
 
+    /// Starts a generic presign request builder.
     pub fn presign(
         &self,
         method: Method,
@@ -242,6 +259,7 @@ impl ObjectsService {
         }
     }
 
+    /// Starts a presigned GET request builder.
     pub fn presign_get(
         &self,
         bucket: impl Into<String>,
@@ -258,6 +276,7 @@ impl ObjectsService {
         }
     }
 
+    /// Starts a presigned PUT request builder.
     pub fn presign_put(
         &self,
         bucket: impl Into<String>,
@@ -274,6 +293,7 @@ impl ObjectsService {
         }
     }
 
+    /// Starts a presigned HEAD request builder.
     pub fn presign_head(
         &self,
         bucket: impl Into<String>,
@@ -289,6 +309,7 @@ impl ObjectsService {
         }
     }
 
+    /// Starts a presigned DELETE request builder.
     pub fn presign_delete(
         &self,
         bucket: impl Into<String>,
@@ -305,6 +326,7 @@ impl ObjectsService {
     }
 }
 
+/// Request builder for fetching an object.
 pub struct GetObjectRequest {
     client: Client,
     bucket: String,
@@ -317,31 +339,37 @@ pub struct GetObjectRequest {
 }
 
 impl GetObjectRequest {
+    /// Sets an inclusive byte range.
     pub fn range_bytes(mut self, start: u64, end_inclusive: u64) -> Self {
         self.range = Some(format!("bytes={start}-{end_inclusive}"));
         self
     }
 
+    /// Adds an If-Match condition.
     pub fn if_match(mut self, value: impl Into<String>) -> Self {
         self.if_match = Some(value.into());
         self
     }
 
+    /// Adds an If-None-Match condition.
     pub fn if_none_match(mut self, value: impl Into<String>) -> Self {
         self.if_none_match = Some(value.into());
         self
     }
 
+    /// Adds an If-Modified-Since condition.
     pub fn if_modified_since(mut self, value: impl Into<String>) -> Self {
         self.if_modified_since = Some(value.into());
         self
     }
 
+    /// Adds an If-Unmodified-Since condition.
     pub fn if_unmodified_since(mut self, value: impl Into<String>) -> Self {
         self.if_unmodified_since = Some(value.into());
         self
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<GetObjectOutput> {
         let mut headers = HeaderMap::new();
         if let Some(range) = self.range {
@@ -406,6 +434,7 @@ impl GetObjectRequest {
     }
 }
 
+/// Request builder for fetching object metadata via HEAD.
 pub struct HeadObjectRequest {
     client: Client,
     bucket: String,
@@ -413,6 +442,7 @@ pub struct HeadObjectRequest {
 }
 
 impl HeadObjectRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<HeadObjectOutput> {
         let resp = self
             .client
@@ -444,6 +474,7 @@ impl HeadObjectRequest {
     }
 }
 
+/// Request builder for uploading an object.
 pub struct PutObjectRequest {
     client: Client,
     bucket: String,
@@ -462,57 +493,68 @@ pub struct PutObjectRequest {
 }
 
 impl PutObjectRequest {
+    /// Sets the Content-Type header.
     pub fn content_type(mut self, value: impl Into<String>) -> Self {
         self.content_type = Some(value.into());
         self
     }
 
+    /// Sets the Cache-Control header.
     pub fn cache_control(mut self, value: impl Into<String>) -> Self {
         self.cache_control = Some(value.into());
         self
     }
 
+    /// Sets the Content-Disposition header.
     pub fn content_disposition(mut self, value: impl Into<String>) -> Self {
         self.content_disposition = Some(value.into());
         self
     }
 
+    /// Sets the Content-Encoding header.
     pub fn content_encoding(mut self, value: impl Into<String>) -> Self {
         self.content_encoding = Some(value.into());
         self
     }
 
+    /// Sets the Content-Language header.
     pub fn content_language(mut self, value: impl Into<String>) -> Self {
         self.content_language = Some(value.into());
         self
     }
 
+    /// Sets the Expires header.
     pub fn expires(mut self, value: impl Into<String>) -> Self {
         self.expires = Some(value.into());
         self
     }
 
+    /// Sets the content length (required for streaming bodies).
     pub fn content_length(mut self, value: u64) -> Self {
         self.content_length = Some(value);
         self
     }
 
+    /// Adds a user metadata entry.
     pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.push((key.into(), value.into()));
         self
     }
 
     #[cfg(feature = "checksums")]
+    /// Sets a checksum to be sent with the upload.
     pub fn checksum(mut self, checksum: crate::types::Checksum) -> Self {
         self.checksum = Some(checksum);
         self
     }
 
+    /// Sets the request body from bytes.
     pub fn body_bytes(mut self, body: impl Into<Bytes>) -> Self {
         self.body = AsyncBody::Bytes(body.into());
         self
     }
 
+    /// Sets the request body from a byte stream.
     pub fn body_stream<S>(mut self, stream: S) -> Self
     where
         S: Stream<Item = std::result::Result<Bytes, io::Error>> + Send + 'static,
@@ -524,6 +566,7 @@ impl PutObjectRequest {
         self
     }
 
+    /// Sets a streaming body with a known content length.
     pub fn body_stream_sized<S>(mut self, stream: S, content_length: u64) -> Self
     where
         S: Stream<Item = std::result::Result<Bytes, io::Error>> + Send + 'static,
@@ -532,6 +575,7 @@ impl PutObjectRequest {
         self.body_stream(stream)
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<PutObjectOutput> {
         let mut headers = HeaderMap::new();
         if let Some(ct) = self.content_type {
@@ -617,6 +661,7 @@ impl PutObjectRequest {
     }
 }
 
+/// Request builder for deleting a single object.
 pub struct DeleteObjectRequest {
     client: Client,
     bucket: String,
@@ -624,6 +669,7 @@ pub struct DeleteObjectRequest {
 }
 
 impl DeleteObjectRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<()> {
         let resp = self
             .client
@@ -645,6 +691,7 @@ impl DeleteObjectRequest {
     }
 }
 
+/// Request builder for deleting multiple objects.
 pub struct DeleteObjectsRequest {
     client: Client,
     bucket: String,
@@ -653,11 +700,13 @@ pub struct DeleteObjectsRequest {
 }
 
 impl DeleteObjectsRequest {
+    /// Adds an object key to delete.
     pub fn object(mut self, key: impl Into<String>) -> Self {
         self.objects.push(DeleteObjectIdentifier::new(key));
         self
     }
 
+    /// Adds an object key and version id to delete.
     pub fn object_with_version(
         mut self,
         key: impl Into<String>,
@@ -668,6 +717,7 @@ impl DeleteObjectsRequest {
         self
     }
 
+    /// Adds multiple object keys to delete.
     pub fn objects<I, S>(mut self, iter: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -678,11 +728,13 @@ impl DeleteObjectsRequest {
         self
     }
 
+    /// Toggles quiet response mode.
     pub fn quiet(mut self, quiet: bool) -> Self {
         self.quiet = quiet;
         self
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<DeleteObjectsOutput> {
         let body = crate::util::xml::encode_delete_objects(&self.objects, self.quiet)?;
         let mut headers = HeaderMap::new();
@@ -720,6 +772,7 @@ impl DeleteObjectsRequest {
     }
 }
 
+/// Request builder for copying an object.
 pub struct CopyObjectRequest {
     client: Client,
     source_bucket: String,
@@ -733,26 +786,31 @@ pub struct CopyObjectRequest {
 }
 
 impl CopyObjectRequest {
+    /// Sets a source version id to copy.
     pub fn source_version_id(mut self, version_id: impl Into<String>) -> Self {
         self.source_version_id = Some(version_id.into());
         self
     }
 
+    /// Replaces metadata on the destination object.
     pub fn replace_metadata(mut self) -> Self {
         self.metadata_directive = Some(MetadataDirective::Replace);
         self
     }
 
+    /// Adds a user metadata entry.
     pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.push((key.into(), value.into()));
         self
     }
 
+    /// Sets the Content-Type for the destination object.
     pub fn content_type(mut self, value: impl Into<String>) -> Self {
         self.content_type = Some(value.into());
         self
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<CopyObjectOutput> {
         let mut headers = HeaderMap::new();
 
@@ -815,6 +873,7 @@ enum MetadataDirective {
 }
 
 #[cfg(feature = "multipart")]
+/// Request builder for initiating a multipart upload.
 pub struct CreateMultipartUploadRequest {
     client: Client,
     bucket: String,
@@ -825,16 +884,19 @@ pub struct CreateMultipartUploadRequest {
 
 #[cfg(feature = "multipart")]
 impl CreateMultipartUploadRequest {
+    /// Sets the Content-Type header.
     pub fn content_type(mut self, value: impl Into<String>) -> Self {
         self.content_type = Some(value.into());
         self
     }
 
+    /// Adds a user metadata entry.
     pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.push((key.into(), value.into()));
         self
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<CreateMultipartUploadOutput> {
         let mut headers = HeaderMap::new();
         if let Some(value) = self.content_type {
@@ -875,6 +937,7 @@ impl CreateMultipartUploadRequest {
 }
 
 #[cfg(feature = "multipart")]
+/// Request builder for uploading a multipart part.
 pub struct UploadPartRequest {
     client: Client,
     bucket: String,
@@ -886,11 +949,13 @@ pub struct UploadPartRequest {
 
 #[cfg(feature = "multipart")]
 impl UploadPartRequest {
+    /// Sets the request body from bytes.
     pub fn body_bytes(mut self, body: impl Into<Bytes>) -> Self {
         self.body = AsyncBody::Bytes(body.into());
         self
     }
 
+    /// Sets the request body from a byte stream.
     pub fn body_stream<S>(mut self, stream: S) -> Self
     where
         S: Stream<Item = std::result::Result<Bytes, io::Error>> + Send + 'static,
@@ -902,6 +967,7 @@ impl UploadPartRequest {
         self
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<UploadPartOutput> {
         let query = vec![
             ("partNumber".to_string(), self.part_number.to_string()),
@@ -931,6 +997,7 @@ impl UploadPartRequest {
 }
 
 #[cfg(feature = "multipart")]
+/// Request builder for uploading a copied multipart part.
 pub struct UploadPartCopyRequest {
     client: Client,
     source_bucket: String,
@@ -945,16 +1012,19 @@ pub struct UploadPartCopyRequest {
 
 #[cfg(feature = "multipart")]
 impl UploadPartCopyRequest {
+    /// Sets the source version id to copy.
     pub fn source_version_id(mut self, version_id: impl Into<String>) -> Self {
         self.source_version_id = Some(version_id.into());
         self
     }
 
+    /// Sets a byte range for the copy source.
     pub fn copy_source_range_bytes(mut self, start: u64, end_inclusive: u64) -> Self {
         self.copy_source_range = Some(format!("bytes={start}-{end_inclusive}"));
         self
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<UploadPartCopyOutput> {
         let mut headers = HeaderMap::new();
 
@@ -1003,6 +1073,7 @@ impl UploadPartCopyRequest {
 }
 
 #[cfg(feature = "multipart")]
+/// Request builder for completing a multipart upload.
 pub struct CompleteMultipartUploadRequest {
     client: Client,
     bucket: String,
@@ -1013,6 +1084,7 @@ pub struct CompleteMultipartUploadRequest {
 
 #[cfg(feature = "multipart")]
 impl CompleteMultipartUploadRequest {
+    /// Adds a completed part by number and etag.
     pub fn part(mut self, part_number: u32, etag: impl Into<String>) -> Self {
         self.parts.push(CompletedPart {
             part_number,
@@ -1021,6 +1093,7 @@ impl CompleteMultipartUploadRequest {
         self
     }
 
+    /// Adds multiple completed parts.
     pub fn parts<I>(mut self, iter: I) -> Self
     where
         I: IntoIterator<Item = CompletedPart>,
@@ -1029,6 +1102,7 @@ impl CompleteMultipartUploadRequest {
         self
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<CompleteMultipartUploadOutput> {
         let body = crate::util::xml::encode_complete_multipart_upload(&self.parts)?;
         let mut headers = HeaderMap::new();
@@ -1062,6 +1136,7 @@ impl CompleteMultipartUploadRequest {
 }
 
 #[cfg(feature = "multipart")]
+/// Request builder for aborting a multipart upload.
 pub struct AbortMultipartUploadRequest {
     client: Client,
     bucket: String,
@@ -1071,6 +1146,7 @@ pub struct AbortMultipartUploadRequest {
 
 #[cfg(feature = "multipart")]
 impl AbortMultipartUploadRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<AbortMultipartUploadOutput> {
         let resp = self
             .client
@@ -1093,6 +1169,7 @@ impl AbortMultipartUploadRequest {
 }
 
 #[cfg(feature = "multipart")]
+/// Request builder for listing multipart parts.
 pub struct ListPartsRequest {
     client: Client,
     bucket: String,
@@ -1104,16 +1181,19 @@ pub struct ListPartsRequest {
 
 #[cfg(feature = "multipart")]
 impl ListPartsRequest {
+    /// Sets the maximum number of parts to return.
     pub fn max_parts(mut self, value: u32) -> Self {
         self.max_parts = Some(value);
         self
     }
 
+    /// Sets the part number marker for pagination.
     pub fn part_number_marker(mut self, value: u32) -> Self {
         self.part_number_marker = Some(value);
         self
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<ListPartsOutput> {
         let mut query = vec![("uploadId".to_string(), self.upload_id)];
         if let Some(v) = self.max_parts {
@@ -1147,6 +1227,7 @@ impl ListPartsRequest {
     }
 }
 
+/// Request builder for ListObjectsV2.
 pub struct ListObjectsV2Request {
     client: Client,
     bucket: String,
@@ -1158,31 +1239,37 @@ pub struct ListObjectsV2Request {
 }
 
 impl ListObjectsV2Request {
+    /// Filters by key prefix.
     pub fn prefix(mut self, value: impl Into<String>) -> Self {
         self.prefix = Some(value.into());
         self
     }
 
+    /// Groups keys by delimiter.
     pub fn delimiter(mut self, value: impl Into<String>) -> Self {
         self.delimiter = Some(value.into());
         self
     }
 
+    /// Sets the continuation token for pagination.
     pub fn continuation_token(mut self, value: impl Into<String>) -> Self {
         self.continuation_token = Some(value.into());
         self
     }
 
+    /// Starts listing after the given key.
     pub fn start_after(mut self, value: impl Into<String>) -> Self {
         self.start_after = Some(value.into());
         self
     }
 
+    /// Sets the maximum number of keys to return.
     pub fn max_keys(mut self, value: u32) -> Self {
         self.max_keys = Some(value);
         self
     }
 
+    /// Converts this request into a pager.
     pub fn pager(self) -> ListObjectsV2Pager {
         ListObjectsV2Pager {
             client: self.client,
@@ -1196,6 +1283,7 @@ impl ListObjectsV2Request {
         }
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<ListObjectsV2Output> {
         let mut query = Vec::new();
         query.push(("list-type".to_string(), "2".to_string()));
@@ -1239,6 +1327,7 @@ impl ListObjectsV2Request {
     }
 }
 
+/// Pager for ListObjectsV2 responses.
 pub struct ListObjectsV2Pager {
     client: Client,
     bucket: String,
@@ -1251,6 +1340,7 @@ pub struct ListObjectsV2Pager {
 }
 
 impl ListObjectsV2Pager {
+    /// Fetches the next page, or returns None when complete.
     pub async fn next_page(&mut self) -> Result<Option<ListObjectsV2Output>> {
         if self.done {
             return Ok(None);
@@ -1283,6 +1373,7 @@ impl ListObjectsV2Pager {
     }
 }
 
+/// Request builder for presigned requests with a custom method.
 pub struct PresignObjectRequest {
     client: Client,
     method: Method,
@@ -1295,26 +1386,31 @@ pub struct PresignObjectRequest {
 }
 
 impl PresignObjectRequest {
+    /// Sets the expiry duration.
     pub fn expires_in(mut self, duration: Duration) -> Self {
         self.expires_in = duration;
         self
     }
 
+    /// Adds a query parameter to the presigned URL.
     pub fn query_param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.query_params.push((name.into(), value.into()));
         self
     }
 
+    /// Adds an HTTP header to sign.
     pub fn header(mut self, name: http::header::HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self
     }
 
+    /// Adds a user metadata entry to sign.
     pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.push((key.into(), value.into()));
         self
     }
 
+    /// Builds the presigned request using static credentials.
     pub fn build(self) -> Result<PresignedRequest> {
         let mut headers = self.headers;
         for (name, value) in self.metadata {
@@ -1334,6 +1430,7 @@ impl PresignObjectRequest {
         )
     }
 
+    /// Builds the presigned request using the current credential provider.
     pub async fn build_async(self) -> Result<PresignedRequest> {
         let mut headers = self.headers;
         for (name, value) in self.metadata {
@@ -1356,6 +1453,7 @@ impl PresignObjectRequest {
     }
 }
 
+/// Request builder for presigned GET requests.
 pub struct PresignGetObjectRequest {
     client: Client,
     bucket: String,
@@ -1367,26 +1465,31 @@ pub struct PresignGetObjectRequest {
 }
 
 impl PresignGetObjectRequest {
+    /// Sets the expiry duration.
     pub fn expires_in(mut self, duration: Duration) -> Self {
         self.expires_in = duration;
         self
     }
 
+    /// Adds a query parameter to the presigned URL.
     pub fn query_param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.query_params.push((name.into(), value.into()));
         self
     }
 
+    /// Adds an HTTP header to sign.
     pub fn header(mut self, name: http::header::HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self
     }
 
+    /// Adds a user metadata entry to sign.
     pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.push((key.into(), value.into()));
         self
     }
 
+    /// Builds the presigned request using static credentials.
     pub fn build(self) -> Result<PresignedRequest> {
         let mut headers = self.headers;
         for (name, value) in self.metadata {
@@ -1406,6 +1509,7 @@ impl PresignGetObjectRequest {
         )
     }
 
+    /// Builds the presigned request using the current credential provider.
     pub async fn build_async(self) -> Result<PresignedRequest> {
         let mut headers = self.headers;
         for (name, value) in self.metadata {
@@ -1428,6 +1532,7 @@ impl PresignGetObjectRequest {
     }
 }
 
+/// Request builder for presigned PUT requests.
 pub struct PresignPutObjectRequest {
     client: Client,
     bucket: String,
@@ -1439,26 +1544,31 @@ pub struct PresignPutObjectRequest {
 }
 
 impl PresignPutObjectRequest {
+    /// Sets the expiry duration.
     pub fn expires_in(mut self, duration: Duration) -> Self {
         self.expires_in = duration;
         self
     }
 
+    /// Adds a query parameter to the presigned URL.
     pub fn query_param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.query_params.push((name.into(), value.into()));
         self
     }
 
+    /// Adds an HTTP header to sign.
     pub fn header(mut self, name: http::header::HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self
     }
 
+    /// Adds a user metadata entry to sign.
     pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.push((key.into(), value.into()));
         self
     }
 
+    /// Builds the presigned request using static credentials.
     pub fn build(self) -> Result<PresignedRequest> {
         let mut headers = self.headers;
         for (name, value) in self.metadata {
@@ -1478,6 +1588,7 @@ impl PresignPutObjectRequest {
         )
     }
 
+    /// Builds the presigned request using the current credential provider.
     pub async fn build_async(self) -> Result<PresignedRequest> {
         let mut headers = self.headers;
         for (name, value) in self.metadata {
@@ -1500,6 +1611,7 @@ impl PresignPutObjectRequest {
     }
 }
 
+/// Request builder for presigned HEAD requests.
 pub struct PresignHeadObjectRequest {
     client: Client,
     bucket: String,
@@ -1510,21 +1622,25 @@ pub struct PresignHeadObjectRequest {
 }
 
 impl PresignHeadObjectRequest {
+    /// Sets the expiry duration.
     pub fn expires_in(mut self, duration: Duration) -> Self {
         self.expires_in = duration;
         self
     }
 
+    /// Adds a query parameter to the presigned URL.
     pub fn query_param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.query_params.push((name.into(), value.into()));
         self
     }
 
+    /// Adds an HTTP header to sign.
     pub fn header(mut self, name: http::header::HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self
     }
 
+    /// Builds the presigned request using static credentials.
     pub fn build(self) -> Result<PresignedRequest> {
         self.client.presign(
             Method::HEAD,
@@ -1536,6 +1652,7 @@ impl PresignHeadObjectRequest {
         )
     }
 
+    /// Builds the presigned request using the current credential provider.
     pub async fn build_async(self) -> Result<PresignedRequest> {
         self.client
             .presign_async(
@@ -1550,6 +1667,7 @@ impl PresignHeadObjectRequest {
     }
 }
 
+/// Request builder for presigned DELETE requests.
 pub struct PresignDeleteObjectRequest {
     client: Client,
     bucket: String,
@@ -1560,21 +1678,25 @@ pub struct PresignDeleteObjectRequest {
 }
 
 impl PresignDeleteObjectRequest {
+    /// Sets the expiry duration.
     pub fn expires_in(mut self, duration: Duration) -> Self {
         self.expires_in = duration;
         self
     }
 
+    /// Adds a query parameter to the presigned URL.
     pub fn query_param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.query_params.push((name.into(), value.into()));
         self
     }
 
+    /// Adds an HTTP header to sign.
     pub fn header(mut self, name: http::header::HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self
     }
 
+    /// Builds the presigned request using static credentials.
     pub fn build(self) -> Result<PresignedRequest> {
         self.client.presign(
             Method::DELETE,
@@ -1586,6 +1708,7 @@ impl PresignDeleteObjectRequest {
         )
     }
 
+    /// Builds the presigned request using the current credential provider.
     pub async fn build_async(self) -> Result<PresignedRequest> {
         self.client
             .presign_async(

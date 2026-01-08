@@ -1,3 +1,5 @@
+//! Blocking object operations.
+
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -22,6 +24,7 @@ use crate::types::{
     CreateMultipartUploadOutput, ListPartsOutput, UploadPartCopyOutput, UploadPartOutput,
 };
 
+/// Object operations service (blocking).
 #[derive(Clone)]
 pub struct BlockingObjectsService {
     client: BlockingClient,
@@ -32,6 +35,7 @@ impl BlockingObjectsService {
         Self { client }
     }
 
+    /// Starts a request to GET an object.
     pub fn get(
         &self,
         bucket: impl Into<String>,
@@ -49,6 +53,7 @@ impl BlockingObjectsService {
         }
     }
 
+    /// Starts a request to HEAD an object.
     pub fn head(
         &self,
         bucket: impl Into<String>,
@@ -61,6 +66,7 @@ impl BlockingObjectsService {
         }
     }
 
+    /// Starts a request to PUT an object.
     pub fn put(
         &self,
         bucket: impl Into<String>,
@@ -83,6 +89,7 @@ impl BlockingObjectsService {
         }
     }
 
+    /// Starts a request to DELETE an object.
     pub fn delete(
         &self,
         bucket: impl Into<String>,
@@ -95,6 +102,7 @@ impl BlockingObjectsService {
         }
     }
 
+    /// Starts a request to DELETE multiple objects.
     pub fn delete_objects(&self, bucket: impl Into<String>) -> BlockingDeleteObjectsRequest {
         BlockingDeleteObjectsRequest {
             client: self.client.clone(),
@@ -104,6 +112,7 @@ impl BlockingObjectsService {
         }
     }
 
+    /// Starts a request to copy an object.
     pub fn copy(
         &self,
         source_bucket: impl Into<String>,
@@ -125,6 +134,7 @@ impl BlockingObjectsService {
     }
 
     #[cfg(feature = "multipart")]
+    /// Starts a multipart upload.
     pub fn create_multipart_upload(
         &self,
         bucket: impl Into<String>,
@@ -140,6 +150,7 @@ impl BlockingObjectsService {
     }
 
     #[cfg(feature = "multipart")]
+    /// Starts a request to upload a multipart part.
     pub fn upload_part(
         &self,
         bucket: impl Into<String>,
@@ -158,6 +169,7 @@ impl BlockingObjectsService {
     }
 
     #[cfg(feature = "multipart")]
+    /// Starts a request to copy data into a multipart part.
     pub fn upload_part_copy(
         &self,
         source_bucket: impl Into<String>,
@@ -181,6 +193,7 @@ impl BlockingObjectsService {
     }
 
     #[cfg(feature = "multipart")]
+    /// Starts a request to complete a multipart upload.
     pub fn complete_multipart_upload(
         &self,
         bucket: impl Into<String>,
@@ -197,6 +210,7 @@ impl BlockingObjectsService {
     }
 
     #[cfg(feature = "multipart")]
+    /// Starts a request to abort a multipart upload.
     pub fn abort_multipart_upload(
         &self,
         bucket: impl Into<String>,
@@ -212,6 +226,7 @@ impl BlockingObjectsService {
     }
 
     #[cfg(feature = "multipart")]
+    /// Starts a request to list multipart parts.
     pub fn list_parts(
         &self,
         bucket: impl Into<String>,
@@ -228,6 +243,7 @@ impl BlockingObjectsService {
         }
     }
 
+    /// Starts a ListObjectsV2 request.
     pub fn list_v2(&self, bucket: impl Into<String>) -> BlockingListObjectsV2Request {
         BlockingListObjectsV2Request {
             client: self.client.clone(),
@@ -240,6 +256,7 @@ impl BlockingObjectsService {
         }
     }
 
+    /// Starts a generic presign request builder.
     pub fn presign(
         &self,
         method: Method,
@@ -258,6 +275,7 @@ impl BlockingObjectsService {
         }
     }
 
+    /// Starts a presigned GET request builder.
     pub fn presign_get(
         &self,
         bucket: impl Into<String>,
@@ -274,6 +292,7 @@ impl BlockingObjectsService {
         }
     }
 
+    /// Starts a presigned PUT request builder.
     pub fn presign_put(
         &self,
         bucket: impl Into<String>,
@@ -290,6 +309,7 @@ impl BlockingObjectsService {
         }
     }
 
+    /// Starts a presigned HEAD request builder.
     pub fn presign_head(
         &self,
         bucket: impl Into<String>,
@@ -305,6 +325,7 @@ impl BlockingObjectsService {
         }
     }
 
+    /// Starts a presigned DELETE request builder.
     pub fn presign_delete(
         &self,
         bucket: impl Into<String>,
@@ -321,6 +342,7 @@ impl BlockingObjectsService {
     }
 }
 
+/// Request builder for fetching an object.
 pub struct BlockingGetObjectRequest {
     client: BlockingClient,
     bucket: String,
@@ -333,31 +355,37 @@ pub struct BlockingGetObjectRequest {
 }
 
 impl BlockingGetObjectRequest {
+    /// Sets an inclusive byte range.
     pub fn range_bytes(mut self, start: u64, end_inclusive: u64) -> Self {
         self.range = Some(format!("bytes={start}-{end_inclusive}"));
         self
     }
 
+    /// Adds an If-Match condition.
     pub fn if_match(mut self, value: impl Into<String>) -> Self {
         self.if_match = Some(value.into());
         self
     }
 
+    /// Adds an If-None-Match condition.
     pub fn if_none_match(mut self, value: impl Into<String>) -> Self {
         self.if_none_match = Some(value.into());
         self
     }
 
+    /// Adds an If-Modified-Since condition.
     pub fn if_modified_since(mut self, value: impl Into<String>) -> Self {
         self.if_modified_since = Some(value.into());
         self
     }
 
+    /// Adds an If-Unmodified-Since condition.
     pub fn if_unmodified_since(mut self, value: impl Into<String>) -> Self {
         self.if_unmodified_since = Some(value.into());
         self
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<BlockingGetObjectOutput> {
         let mut headers = HeaderMap::new();
         if let Some(range) = self.range {
@@ -416,6 +444,7 @@ impl BlockingGetObjectRequest {
     }
 }
 
+/// Request builder for fetching object metadata via HEAD.
 pub struct BlockingHeadObjectRequest {
     client: BlockingClient,
     bucket: String,
@@ -423,6 +452,7 @@ pub struct BlockingHeadObjectRequest {
 }
 
 impl BlockingHeadObjectRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<HeadObjectOutput> {
         let resp = self.client.execute(
             Method::HEAD,
@@ -453,6 +483,7 @@ impl BlockingHeadObjectRequest {
     }
 }
 
+/// Request builder for uploading an object.
 pub struct BlockingPutObjectRequest {
     client: BlockingClient,
     bucket: String,
@@ -470,52 +501,62 @@ pub struct BlockingPutObjectRequest {
 }
 
 impl BlockingPutObjectRequest {
+    /// Sets the Content-Type header.
     pub fn content_type(mut self, value: impl Into<String>) -> Self {
         self.content_type = Some(value.into());
         self
     }
 
+    /// Sets the Cache-Control header.
     pub fn cache_control(mut self, value: impl Into<String>) -> Self {
         self.cache_control = Some(value.into());
         self
     }
 
+    /// Sets the Content-Disposition header.
     pub fn content_disposition(mut self, value: impl Into<String>) -> Self {
         self.content_disposition = Some(value.into());
         self
     }
 
+    /// Sets the Content-Encoding header.
     pub fn content_encoding(mut self, value: impl Into<String>) -> Self {
         self.content_encoding = Some(value.into());
         self
     }
 
+    /// Sets the Content-Language header.
     pub fn content_language(mut self, value: impl Into<String>) -> Self {
         self.content_language = Some(value.into());
         self
     }
 
+    /// Sets the Expires header.
     pub fn expires(mut self, value: impl Into<String>) -> Self {
         self.expires = Some(value.into());
         self
     }
 
+    /// Adds a user metadata entry.
     pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.push((key.into(), value.into()));
         self
     }
 
     #[cfg(feature = "checksums")]
+    /// Sets a checksum to be sent with the upload.
     pub fn checksum(mut self, checksum: crate::types::Checksum) -> Self {
         self.checksum = Some(checksum);
         self
     }
 
+    /// Sets the request body from bytes.
     pub fn body_bytes(mut self, body: impl Into<Bytes>) -> Self {
         self.body = BlockingBody::Bytes(body.into());
         self
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<PutObjectOutput> {
         let mut headers = HeaderMap::new();
         if let Some(ct) = self.content_type {
@@ -582,6 +623,7 @@ impl BlockingPutObjectRequest {
     }
 }
 
+/// Request builder for deleting a single object.
 pub struct BlockingDeleteObjectRequest {
     client: BlockingClient,
     bucket: String,
@@ -589,6 +631,7 @@ pub struct BlockingDeleteObjectRequest {
 }
 
 impl BlockingDeleteObjectRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<()> {
         let resp = self.client.execute(
             Method::DELETE,
@@ -610,6 +653,7 @@ impl BlockingDeleteObjectRequest {
     }
 }
 
+/// Request builder for deleting multiple objects.
 pub struct BlockingDeleteObjectsRequest {
     client: BlockingClient,
     bucket: String,
@@ -618,11 +662,13 @@ pub struct BlockingDeleteObjectsRequest {
 }
 
 impl BlockingDeleteObjectsRequest {
+    /// Adds an object key to delete.
     pub fn object(mut self, key: impl Into<String>) -> Self {
         self.objects.push(DeleteObjectIdentifier::new(key));
         self
     }
 
+    /// Adds an object key and version id to delete.
     pub fn object_with_version(
         mut self,
         key: impl Into<String>,
@@ -633,6 +679,7 @@ impl BlockingDeleteObjectsRequest {
         self
     }
 
+    /// Adds multiple object keys to delete.
     pub fn objects<I, S>(mut self, iter: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -643,11 +690,13 @@ impl BlockingDeleteObjectsRequest {
         self
     }
 
+    /// Toggles quiet response mode.
     pub fn quiet(mut self, quiet: bool) -> Self {
         self.quiet = quiet;
         self
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<DeleteObjectsOutput> {
         let body = crate::util::xml::encode_delete_objects(&self.objects, self.quiet)?;
         let mut headers = HeaderMap::new();
@@ -682,6 +731,7 @@ impl BlockingDeleteObjectsRequest {
     }
 }
 
+/// Request builder for copying an object.
 pub struct BlockingCopyObjectRequest {
     client: BlockingClient,
     source_bucket: String,
@@ -695,26 +745,31 @@ pub struct BlockingCopyObjectRequest {
 }
 
 impl BlockingCopyObjectRequest {
+    /// Sets a source version id to copy.
     pub fn source_version_id(mut self, version_id: impl Into<String>) -> Self {
         self.source_version_id = Some(version_id.into());
         self
     }
 
+    /// Replaces metadata on the destination object.
     pub fn replace_metadata(mut self) -> Self {
         self.metadata_directive = Some(MetadataDirective::Replace);
         self
     }
 
+    /// Adds a user metadata entry.
     pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.push((key.into(), value.into()));
         self
     }
 
+    /// Sets the Content-Type for the destination object.
     pub fn content_type(mut self, value: impl Into<String>) -> Self {
         self.content_type = Some(value.into());
         self
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<CopyObjectOutput> {
         let mut headers = HeaderMap::new();
 
@@ -774,6 +829,7 @@ enum MetadataDirective {
 }
 
 #[cfg(feature = "multipart")]
+/// Request builder for initiating a multipart upload.
 pub struct BlockingCreateMultipartUploadRequest {
     client: BlockingClient,
     bucket: String,
@@ -784,16 +840,19 @@ pub struct BlockingCreateMultipartUploadRequest {
 
 #[cfg(feature = "multipart")]
 impl BlockingCreateMultipartUploadRequest {
+    /// Sets the Content-Type header.
     pub fn content_type(mut self, value: impl Into<String>) -> Self {
         self.content_type = Some(value.into());
         self
     }
 
+    /// Adds a user metadata entry.
     pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.push((key.into(), value.into()));
         self
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<CreateMultipartUploadOutput> {
         let mut headers = HeaderMap::new();
         if let Some(value) = self.content_type {
@@ -831,6 +890,7 @@ impl BlockingCreateMultipartUploadRequest {
 }
 
 #[cfg(feature = "multipart")]
+/// Request builder for uploading a multipart part.
 pub struct BlockingUploadPartRequest {
     client: BlockingClient,
     bucket: String,
@@ -842,11 +902,13 @@ pub struct BlockingUploadPartRequest {
 
 #[cfg(feature = "multipart")]
 impl BlockingUploadPartRequest {
+    /// Sets the request body from bytes.
     pub fn body_bytes(mut self, body: impl Into<Bytes>) -> Self {
         self.body = BlockingBody::Bytes(body.into());
         self
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<UploadPartOutput> {
         match &self.body {
             BlockingBody::Bytes(_) => {}
@@ -882,6 +944,7 @@ impl BlockingUploadPartRequest {
 }
 
 #[cfg(feature = "multipart")]
+/// Request builder for uploading a copied multipart part.
 pub struct BlockingUploadPartCopyRequest {
     client: BlockingClient,
     source_bucket: String,
@@ -896,16 +959,19 @@ pub struct BlockingUploadPartCopyRequest {
 
 #[cfg(feature = "multipart")]
 impl BlockingUploadPartCopyRequest {
+    /// Sets the source version id to copy.
     pub fn source_version_id(mut self, version_id: impl Into<String>) -> Self {
         self.source_version_id = Some(version_id.into());
         self
     }
 
+    /// Sets a byte range for the copy source.
     pub fn copy_source_range_bytes(mut self, start: u64, end_inclusive: u64) -> Self {
         self.copy_source_range = Some(format!("bytes={start}-{end_inclusive}"));
         self
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<UploadPartCopyOutput> {
         let mut headers = HeaderMap::new();
 
@@ -951,6 +1017,7 @@ impl BlockingUploadPartCopyRequest {
 }
 
 #[cfg(feature = "multipart")]
+/// Request builder for completing a multipart upload.
 pub struct BlockingCompleteMultipartUploadRequest {
     client: BlockingClient,
     bucket: String,
@@ -961,6 +1028,7 @@ pub struct BlockingCompleteMultipartUploadRequest {
 
 #[cfg(feature = "multipart")]
 impl BlockingCompleteMultipartUploadRequest {
+    /// Adds a completed part by number and etag.
     pub fn part(mut self, part_number: u32, etag: impl Into<String>) -> Self {
         self.parts.push(CompletedPart {
             part_number,
@@ -969,6 +1037,7 @@ impl BlockingCompleteMultipartUploadRequest {
         self
     }
 
+    /// Adds multiple completed parts.
     pub fn parts<I>(mut self, iter: I) -> Self
     where
         I: IntoIterator<Item = CompletedPart>,
@@ -977,6 +1046,7 @@ impl BlockingCompleteMultipartUploadRequest {
         self
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<CompleteMultipartUploadOutput> {
         let body = crate::util::xml::encode_complete_multipart_upload(&self.parts)?;
         let mut headers = HeaderMap::new();
@@ -1007,6 +1077,7 @@ impl BlockingCompleteMultipartUploadRequest {
 }
 
 #[cfg(feature = "multipart")]
+/// Request builder for aborting a multipart upload.
 pub struct BlockingAbortMultipartUploadRequest {
     client: BlockingClient,
     bucket: String,
@@ -1016,6 +1087,7 @@ pub struct BlockingAbortMultipartUploadRequest {
 
 #[cfg(feature = "multipart")]
 impl BlockingAbortMultipartUploadRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<AbortMultipartUploadOutput> {
         let resp = self.client.execute(
             Method::DELETE,
@@ -1037,6 +1109,7 @@ impl BlockingAbortMultipartUploadRequest {
 }
 
 #[cfg(feature = "multipart")]
+/// Request builder for listing multipart parts.
 pub struct BlockingListPartsRequest {
     client: BlockingClient,
     bucket: String,
@@ -1048,16 +1121,19 @@ pub struct BlockingListPartsRequest {
 
 #[cfg(feature = "multipart")]
 impl BlockingListPartsRequest {
+    /// Sets the maximum number of parts to return.
     pub fn max_parts(mut self, value: u32) -> Self {
         self.max_parts = Some(value);
         self
     }
 
+    /// Sets the part number marker for pagination.
     pub fn part_number_marker(mut self, value: u32) -> Self {
         self.part_number_marker = Some(value);
         self
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<ListPartsOutput> {
         let mut query = vec![("uploadId".to_string(), self.upload_id)];
         if let Some(v) = self.max_parts {
@@ -1088,6 +1164,7 @@ impl BlockingListPartsRequest {
     }
 }
 
+/// Request builder for ListObjectsV2.
 pub struct BlockingListObjectsV2Request {
     client: BlockingClient,
     bucket: String,
@@ -1099,31 +1176,37 @@ pub struct BlockingListObjectsV2Request {
 }
 
 impl BlockingListObjectsV2Request {
+    /// Filters by key prefix.
     pub fn prefix(mut self, value: impl Into<String>) -> Self {
         self.prefix = Some(value.into());
         self
     }
 
+    /// Groups keys by delimiter.
     pub fn delimiter(mut self, value: impl Into<String>) -> Self {
         self.delimiter = Some(value.into());
         self
     }
 
+    /// Sets the continuation token for pagination.
     pub fn continuation_token(mut self, value: impl Into<String>) -> Self {
         self.continuation_token = Some(value.into());
         self
     }
 
+    /// Starts listing after the given key.
     pub fn start_after(mut self, value: impl Into<String>) -> Self {
         self.start_after = Some(value.into());
         self
     }
 
+    /// Sets the maximum number of keys to return.
     pub fn max_keys(mut self, value: u32) -> Self {
         self.max_keys = Some(value);
         self
     }
 
+    /// Converts this request into a pager.
     pub fn pager(self) -> BlockingListObjectsV2Pager {
         BlockingListObjectsV2Pager {
             client: self.client,
@@ -1137,6 +1220,7 @@ impl BlockingListObjectsV2Request {
         }
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<ListObjectsV2Output> {
         let mut query = Vec::new();
         query.push(("list-type".to_string(), "2".to_string()));
@@ -1177,6 +1261,7 @@ impl BlockingListObjectsV2Request {
     }
 }
 
+/// Pager for ListObjectsV2 responses.
 pub struct BlockingListObjectsV2Pager {
     client: BlockingClient,
     bucket: String,
@@ -1229,6 +1314,7 @@ impl Iterator for BlockingListObjectsV2Pager {
     }
 }
 
+/// Request builder for presigned requests with a custom method.
 pub struct BlockingPresignObjectRequest {
     client: BlockingClient,
     method: Method,
@@ -1241,26 +1327,31 @@ pub struct BlockingPresignObjectRequest {
 }
 
 impl BlockingPresignObjectRequest {
+    /// Sets the expiry duration.
     pub fn expires_in(mut self, duration: Duration) -> Self {
         self.expires_in = duration;
         self
     }
 
+    /// Adds a query parameter to the presigned URL.
     pub fn query_param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.query_params.push((name.into(), value.into()));
         self
     }
 
+    /// Adds an HTTP header to sign.
     pub fn header(mut self, name: http::header::HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self
     }
 
+    /// Adds a user metadata entry to sign.
     pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.push((key.into(), value.into()));
         self
     }
 
+    /// Builds the presigned request.
     pub fn build(self) -> Result<PresignedRequest> {
         let mut headers = self.headers;
         for (name, value) in self.metadata {
@@ -1281,6 +1372,7 @@ impl BlockingPresignObjectRequest {
     }
 }
 
+/// Request builder for presigned GET requests.
 pub struct BlockingPresignGetObjectRequest {
     client: BlockingClient,
     bucket: String,
@@ -1292,26 +1384,31 @@ pub struct BlockingPresignGetObjectRequest {
 }
 
 impl BlockingPresignGetObjectRequest {
+    /// Sets the expiry duration.
     pub fn expires_in(mut self, duration: Duration) -> Self {
         self.expires_in = duration;
         self
     }
 
+    /// Adds a query parameter to the presigned URL.
     pub fn query_param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.query_params.push((name.into(), value.into()));
         self
     }
 
+    /// Adds an HTTP header to sign.
     pub fn header(mut self, name: http::header::HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self
     }
 
+    /// Adds a user metadata entry to sign.
     pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.push((key.into(), value.into()));
         self
     }
 
+    /// Builds the presigned request.
     pub fn build(self) -> Result<PresignedRequest> {
         let mut headers = self.headers;
         for (name, value) in self.metadata {
@@ -1332,6 +1429,7 @@ impl BlockingPresignGetObjectRequest {
     }
 }
 
+/// Request builder for presigned PUT requests.
 pub struct BlockingPresignPutObjectRequest {
     client: BlockingClient,
     bucket: String,
@@ -1343,26 +1441,31 @@ pub struct BlockingPresignPutObjectRequest {
 }
 
 impl BlockingPresignPutObjectRequest {
+    /// Sets the expiry duration.
     pub fn expires_in(mut self, duration: Duration) -> Self {
         self.expires_in = duration;
         self
     }
 
+    /// Adds a query parameter to the presigned URL.
     pub fn query_param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.query_params.push((name.into(), value.into()));
         self
     }
 
+    /// Adds an HTTP header to sign.
     pub fn header(mut self, name: http::header::HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self
     }
 
+    /// Adds a user metadata entry to sign.
     pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.push((key.into(), value.into()));
         self
     }
 
+    /// Builds the presigned request.
     pub fn build(self) -> Result<PresignedRequest> {
         let mut headers = self.headers;
         for (name, value) in self.metadata {
@@ -1383,6 +1486,7 @@ impl BlockingPresignPutObjectRequest {
     }
 }
 
+/// Request builder for presigned HEAD requests.
 pub struct BlockingPresignHeadObjectRequest {
     client: BlockingClient,
     bucket: String,
@@ -1393,21 +1497,25 @@ pub struct BlockingPresignHeadObjectRequest {
 }
 
 impl BlockingPresignHeadObjectRequest {
+    /// Sets the expiry duration.
     pub fn expires_in(mut self, duration: Duration) -> Self {
         self.expires_in = duration;
         self
     }
 
+    /// Adds a query parameter to the presigned URL.
     pub fn query_param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.query_params.push((name.into(), value.into()));
         self
     }
 
+    /// Adds an HTTP header to sign.
     pub fn header(mut self, name: http::header::HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self
     }
 
+    /// Builds the presigned request.
     pub fn build(self) -> Result<PresignedRequest> {
         self.client.presign(
             Method::HEAD,
@@ -1420,6 +1528,7 @@ impl BlockingPresignHeadObjectRequest {
     }
 }
 
+/// Request builder for presigned DELETE requests.
 pub struct BlockingPresignDeleteObjectRequest {
     client: BlockingClient,
     bucket: String,
@@ -1430,21 +1539,25 @@ pub struct BlockingPresignDeleteObjectRequest {
 }
 
 impl BlockingPresignDeleteObjectRequest {
+    /// Sets the expiry duration.
     pub fn expires_in(mut self, duration: Duration) -> Self {
         self.expires_in = duration;
         self
     }
 
+    /// Adds a query parameter to the presigned URL.
     pub fn query_param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.query_params.push((name.into(), value.into()));
         self
     }
 
+    /// Adds an HTTP header to sign.
     pub fn header(mut self, name: http::header::HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self
     }
 
+    /// Builds the presigned request.
     pub fn build(self) -> Result<PresignedRequest> {
         self.client.presign(
             Method::DELETE,

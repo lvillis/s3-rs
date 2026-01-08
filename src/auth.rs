@@ -11,6 +11,7 @@ use time::OffsetDateTime;
 
 use crate::{Error, Result};
 
+/// Snapshot of credentials and optional expiration metadata.
 #[derive(Clone, Debug)]
 pub struct CredentialsSnapshot {
     credentials: Credentials,
@@ -18,6 +19,7 @@ pub struct CredentialsSnapshot {
 }
 
 impl CredentialsSnapshot {
+    /// Creates a snapshot without an expiration time.
     pub fn new(credentials: Credentials) -> Self {
         Self {
             credentials,
@@ -25,32 +27,40 @@ impl CredentialsSnapshot {
         }
     }
 
+    /// Sets the expiration time for this snapshot.
     pub fn with_expires_at(mut self, expires_at: OffsetDateTime) -> Self {
         self.expires_at = Some(expires_at);
         self
     }
 
+    /// Returns the credential material.
     pub fn credentials(&self) -> &Credentials {
         &self.credentials
     }
 
+    /// Returns the expiration time if known.
     pub fn expires_at(&self) -> Option<OffsetDateTime> {
         self.expires_at
     }
 }
 
 #[cfg(feature = "async")]
+/// Async credentials lookup future.
 pub type CredentialsFuture<'a> =
     Pin<Box<dyn Future<Output = Result<CredentialsSnapshot>> + Send + 'a>>;
 
+/// Source of credential snapshots for request signing.
 pub trait CredentialsProvider: fmt::Debug + Send + Sync {
+    /// Returns credentials asynchronously.
     #[cfg(feature = "async")]
     fn credentials_async(&self) -> CredentialsFuture<'_>;
 
+    /// Returns credentials in blocking mode.
     #[cfg(feature = "blocking")]
     fn credentials_blocking(&self) -> Result<CredentialsSnapshot>;
 }
 
+/// Shared credentials provider trait object.
 pub type DynCredentialsProvider = Arc<dyn CredentialsProvider>;
 
 #[cfg(feature = "credentials-sts")]
@@ -162,6 +172,7 @@ struct CachedState {
     last_refresh_attempt: Option<std::time::Instant>,
 }
 
+/// Cached credentials wrapper with refresh and throttling.
 #[derive(Debug)]
 pub struct CachedProvider<P> {
     inner: P,
@@ -177,6 +188,7 @@ impl<P> CachedProvider<P>
 where
     P: CredentialsProvider,
 {
+    /// Wraps a provider with caching and refresh behavior.
     pub fn new(inner: P) -> Self {
         Self {
             inner,
@@ -193,16 +205,19 @@ where
         }
     }
 
+    /// Sets how long before expiration to refresh.
     pub fn refresh_before(mut self, duration: Duration) -> Self {
         self.refresh_before = duration;
         self
     }
 
+    /// Sets the minimum interval between refresh attempts.
     pub fn min_refresh_interval(mut self, duration: Duration) -> Self {
         self.min_refresh_interval = duration;
         self
     }
 
+    /// Seeds the cache with an initial snapshot.
     pub fn with_initial(self, snapshot: CredentialsSnapshot) -> Self {
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         state.cached = Some(snapshot);
@@ -210,11 +225,13 @@ where
         self
     }
 
+    /// Forces a refresh in async mode.
     #[cfg(feature = "async")]
     pub async fn force_refresh_async(&self) -> Result<CredentialsSnapshot> {
         self.get_async(true).await
     }
 
+    /// Forces a refresh in blocking mode.
     #[cfg(feature = "blocking")]
     pub fn force_refresh_blocking(&self) -> Result<CredentialsSnapshot> {
         self.get_blocking(true)
@@ -400,10 +417,12 @@ where
     }
 }
 
+/// Region identifier used for signing.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Region(String);
 
 impl Region {
+    /// Creates a region from a non-empty string.
     pub fn new(value: impl Into<String>) -> Result<Self> {
         let value = value.into();
         if value.trim().is_empty() {
@@ -412,6 +431,7 @@ impl Region {
         Ok(Self(value))
     }
 
+    /// Returns the region string.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -437,14 +457,19 @@ impl TryFrom<&str> for Region {
     }
 }
 
+/// Static access credentials with optional session token.
 #[derive(Clone)]
 pub struct Credentials {
+    /// Access key identifier.
     pub access_key_id: String,
+    /// Secret access key.
     pub secret_access_key: String,
+    /// Optional session token for temporary credentials.
     pub session_token: Option<String>,
 }
 
 impl Credentials {
+    /// Creates credentials from access and secret keys.
     pub fn new(
         access_key_id: impl Into<String>,
         secret_access_key: impl Into<String>,
@@ -466,6 +491,7 @@ impl Credentials {
         })
     }
 
+    /// Attaches a session token for temporary credentials.
     pub fn with_session_token(mut self, session_token: impl Into<String>) -> Result<Self> {
         let session_token = session_token.into();
         if session_token.trim().is_empty() {
@@ -495,15 +521,22 @@ impl fmt::Debug for Credentials {
     }
 }
 
+/// Authentication configuration for requests.
 #[non_exhaustive]
 #[derive(Clone, Debug)]
 pub enum Auth {
+    /// Send unsigned requests.
     Anonymous,
+    /// Static access keys (and optional session token).
     Static(Credentials),
+    /// Dynamic credentials provider.
     Provider(DynCredentialsProvider),
 }
 
 impl Auth {
+    /// Loads static credentials from standard AWS env vars.
+    ///
+    /// Reads `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optionally `AWS_SESSION_TOKEN`.
     pub fn from_env() -> Result<Self> {
         let access_key_id = std::env::var("AWS_ACCESS_KEY_ID")
             .map_err(|_| Error::invalid_config("missing AWS_ACCESS_KEY_ID"))?;
@@ -519,21 +552,25 @@ impl Auth {
         Ok(Self::Static(creds))
     }
 
+    /// Uses a dynamic credentials provider.
     pub fn provider(provider: DynCredentialsProvider) -> Self {
         Self::Provider(provider)
     }
 
+    /// Loads credentials from a named profile.
     #[cfg(feature = "credentials-profile")]
     pub fn from_profile(profile: impl AsRef<str>) -> Result<Self> {
         let creds = crate::credentials::profile::load_profile_credentials(profile.as_ref())?;
         Ok(Self::Static(creds))
     }
 
+    /// Loads credentials from the profile defined by environment variables.
     #[cfg(feature = "credentials-profile")]
     pub fn from_profile_env() -> Result<Self> {
         Self::from_profile(crate::credentials::profile::profile_from_env())
     }
 
+    /// Loads IMDS credentials and wraps them in a cached provider.
     #[cfg(all(feature = "credentials-imds", feature = "async"))]
     pub async fn from_imds() -> Result<Self> {
         let initial = crate::credentials::imds::load_async().await?;
@@ -541,6 +578,7 @@ impl Auth {
         Ok(Self::Provider(Arc::new(provider)))
     }
 
+    /// Loads IMDS credentials and wraps them in a cached provider.
     #[cfg(all(feature = "credentials-imds", feature = "blocking"))]
     pub fn from_imds_blocking() -> Result<Self> {
         let initial = crate::credentials::imds::load_blocking()?;
@@ -548,6 +586,7 @@ impl Auth {
         Ok(Self::Provider(Arc::new(provider)))
     }
 
+    /// Assumes a role using static source credentials (async).
     #[cfg(all(feature = "credentials-sts", feature = "async"))]
     pub async fn assume_role(
         region: Region,
@@ -564,6 +603,7 @@ impl Auth {
         .await
     }
 
+    /// Assumes a role using static source credentials (blocking).
     #[cfg(all(feature = "credentials-sts", feature = "blocking"))]
     pub fn assume_role_blocking(
         region: Region,
@@ -579,6 +619,7 @@ impl Auth {
         )
     }
 
+    /// Loads web identity credentials from env vars (async).
     #[cfg(all(feature = "credentials-sts", feature = "async"))]
     pub async fn from_web_identity_env() -> Result<Self> {
         let provider = StsWebIdentityProvider;
@@ -587,6 +628,7 @@ impl Auth {
         Ok(Self::Provider(Arc::new(provider)))
     }
 
+    /// Loads web identity credentials from env vars (blocking).
     #[cfg(all(feature = "credentials-sts", feature = "blocking"))]
     pub fn from_web_identity_env_blocking() -> Result<Self> {
         let provider = StsWebIdentityProvider;
@@ -595,6 +637,7 @@ impl Auth {
         Ok(Self::Provider(Arc::new(provider)))
     }
 
+    /// Assumes a role using a credentials provider (async).
     #[cfg(all(feature = "credentials-sts", feature = "async"))]
     pub async fn assume_role_with_provider(
         region: Region,
@@ -613,6 +656,7 @@ impl Auth {
         Ok(Self::Provider(Arc::new(provider)))
     }
 
+    /// Assumes a role using a credentials provider (blocking).
     #[cfg(all(feature = "credentials-sts", feature = "blocking"))]
     pub fn assume_role_with_provider_blocking(
         region: Region,
@@ -658,11 +702,15 @@ impl Auth {
     }
 }
 
+/// How the bucket name is encoded into the request URL.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AddressingStyle {
+    /// Automatically choose virtual-hosted vs path style.
     Auto,
+    /// Always use path-style URLs.
     Path,
+    /// Always use virtual-hosted-style URLs.
     VirtualHosted,
 }
 
@@ -811,6 +859,13 @@ mod tests {
                         .with_expires_at(OffsetDateTime::now_utc() + time::Duration::seconds(60)))
                 })
             }
+
+            #[cfg(feature = "blocking")]
+            fn credentials_blocking(&self) -> Result<CredentialsSnapshot> {
+                Err(Error::invalid_config(
+                    "blocking credentials not supported in async test",
+                ))
+            }
         }
 
         let calls = Arc::new(AtomicUsize::new(0));
@@ -940,6 +995,15 @@ mod tests {
         }
 
         impl CredentialsProvider for SlowProvider {
+            #[cfg(feature = "async")]
+            fn credentials_async(&self) -> CredentialsFuture<'_> {
+                Box::pin(async {
+                    Err(Error::invalid_config(
+                        "async credentials not supported in blocking test",
+                    ))
+                })
+            }
+
             fn credentials_blocking(&self) -> Result<CredentialsSnapshot> {
                 self.calls.fetch_add(1, Ordering::SeqCst);
                 if let Some(tx) = self

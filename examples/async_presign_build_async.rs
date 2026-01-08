@@ -20,6 +20,11 @@ impl CredentialsProvider for StaticProvider {
         let snapshot = CredentialsSnapshot::new(self.credentials.clone());
         Box::pin(async move { Ok(snapshot) })
     }
+
+    #[cfg(feature = "blocking")]
+    fn credentials_blocking(&self) -> s3::Result<CredentialsSnapshot> {
+        Ok(CredentialsSnapshot::new(self.credentials.clone()))
+    }
 }
 
 #[cfg(feature = "async")]

@@ -1,3 +1,5 @@
+//! Async bucket operations.
+
 use bytes::Bytes;
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
 
@@ -16,6 +18,7 @@ use crate::{
     },
 };
 
+/// Bucket operations service.
 #[derive(Clone)]
 pub struct BucketsService {
     client: Client,
@@ -26,12 +29,14 @@ impl BucketsService {
         Self { client }
     }
 
+    /// Starts a request to list buckets.
     pub fn list(&self) -> ListBucketsRequest {
         ListBucketsRequest {
             client: self.client.clone(),
         }
     }
 
+    /// Starts a request to check if a bucket exists.
     pub fn head(&self, bucket: impl Into<String>) -> HeadBucketRequest {
         HeadBucketRequest {
             client: self.client.clone(),
@@ -39,6 +44,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to create a bucket.
     pub fn create(&self, bucket: impl Into<String>) -> CreateBucketRequest {
         CreateBucketRequest {
             client: self.client.clone(),
@@ -47,6 +53,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to delete a bucket.
     pub fn delete(&self, bucket: impl Into<String>) -> DeleteBucketRequest {
         DeleteBucketRequest {
             client: self.client.clone(),
@@ -54,6 +61,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to get bucket versioning.
     pub fn get_versioning(&self, bucket: impl Into<String>) -> GetBucketVersioningRequest {
         GetBucketVersioningRequest {
             client: self.client.clone(),
@@ -61,6 +69,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to set bucket versioning.
     pub fn put_versioning(&self, bucket: impl Into<String>) -> PutBucketVersioningRequest {
         PutBucketVersioningRequest {
             client: self.client.clone(),
@@ -69,6 +78,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to get bucket lifecycle configuration.
     pub fn get_lifecycle(&self, bucket: impl Into<String>) -> GetBucketLifecycleRequest {
         GetBucketLifecycleRequest {
             client: self.client.clone(),
@@ -76,6 +86,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to set bucket lifecycle configuration.
     pub fn put_lifecycle(&self, bucket: impl Into<String>) -> PutBucketLifecycleRequest {
         PutBucketLifecycleRequest {
             client: self.client.clone(),
@@ -84,6 +95,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to delete bucket lifecycle configuration.
     pub fn delete_lifecycle(&self, bucket: impl Into<String>) -> DeleteBucketLifecycleRequest {
         DeleteBucketLifecycleRequest {
             client: self.client.clone(),
@@ -91,6 +103,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to get bucket CORS rules.
     pub fn get_cors(&self, bucket: impl Into<String>) -> GetBucketCorsRequest {
         GetBucketCorsRequest {
             client: self.client.clone(),
@@ -98,6 +111,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to set bucket CORS rules.
     pub fn put_cors(&self, bucket: impl Into<String>) -> PutBucketCorsRequest {
         PutBucketCorsRequest {
             client: self.client.clone(),
@@ -106,6 +120,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to delete bucket CORS rules.
     pub fn delete_cors(&self, bucket: impl Into<String>) -> DeleteBucketCorsRequest {
         DeleteBucketCorsRequest {
             client: self.client.clone(),
@@ -113,6 +128,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to get bucket tags.
     pub fn get_tagging(&self, bucket: impl Into<String>) -> GetBucketTaggingRequest {
         GetBucketTaggingRequest {
             client: self.client.clone(),
@@ -120,6 +136,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to set bucket tags.
     pub fn put_tagging(&self, bucket: impl Into<String>) -> PutBucketTaggingRequest {
         PutBucketTaggingRequest {
             client: self.client.clone(),
@@ -128,6 +145,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to delete bucket tags.
     pub fn delete_tagging(&self, bucket: impl Into<String>) -> DeleteBucketTaggingRequest {
         DeleteBucketTaggingRequest {
             client: self.client.clone(),
@@ -135,6 +153,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to get bucket encryption configuration.
     pub fn get_encryption(&self, bucket: impl Into<String>) -> GetBucketEncryptionRequest {
         GetBucketEncryptionRequest {
             client: self.client.clone(),
@@ -142,6 +161,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to set bucket encryption configuration.
     pub fn put_encryption(&self, bucket: impl Into<String>) -> PutBucketEncryptionRequest {
         PutBucketEncryptionRequest {
             client: self.client.clone(),
@@ -150,6 +170,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to delete bucket encryption configuration.
     pub fn delete_encryption(&self, bucket: impl Into<String>) -> DeleteBucketEncryptionRequest {
         DeleteBucketEncryptionRequest {
             client: self.client.clone(),
@@ -157,6 +178,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to get public access block settings.
     pub fn get_public_access_block(
         &self,
         bucket: impl Into<String>,
@@ -167,6 +189,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to set public access block settings.
     pub fn put_public_access_block(
         &self,
         bucket: impl Into<String>,
@@ -178,6 +201,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to delete public access block settings.
     pub fn delete_public_access_block(
         &self,
         bucket: impl Into<String>,
@@ -188,6 +212,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to read a raw bucket config subresource.
     pub fn get_config_raw(
         &self,
         bucket: impl Into<String>,
@@ -200,6 +225,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to write a raw bucket config subresource.
     pub fn put_config_raw(
         &self,
         bucket: impl Into<String>,
@@ -213,6 +239,7 @@ impl BucketsService {
         }
     }
 
+    /// Starts a request to delete a raw bucket config subresource.
     pub fn delete_config_raw(
         &self,
         bucket: impl Into<String>,
@@ -226,11 +253,13 @@ impl BucketsService {
     }
 }
 
+/// Request builder for listing buckets.
 pub struct ListBucketsRequest {
     client: Client,
 }
 
 impl ListBucketsRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<ListBucketsOutput> {
         let resp = self
             .client
@@ -256,12 +285,14 @@ impl ListBucketsRequest {
     }
 }
 
+/// Request builder for checking bucket existence.
 pub struct HeadBucketRequest {
     client: Client,
     bucket: String,
 }
 
 impl HeadBucketRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<HeadBucketOutput> {
         let resp = self
             .client
@@ -285,6 +316,7 @@ impl HeadBucketRequest {
     }
 }
 
+/// Request builder for creating a bucket.
 pub struct CreateBucketRequest {
     client: Client,
     bucket: String,
@@ -292,11 +324,13 @@ pub struct CreateBucketRequest {
 }
 
 impl CreateBucketRequest {
+    /// Sets the location constraint for bucket creation.
     pub fn location_constraint(mut self, region: impl Into<String>) -> Self {
         self.location_constraint = Some(region.into());
         self
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<CreateBucketOutput> {
         let mut headers = HeaderMap::new();
         let body = match self.location_constraint {
@@ -335,12 +369,14 @@ impl CreateBucketRequest {
     }
 }
 
+/// Request builder for deleting a bucket.
 pub struct DeleteBucketRequest {
     client: Client,
     bucket: String,
 }
 
 impl DeleteBucketRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<DeleteBucketOutput> {
         let resp = self
             .client
@@ -362,12 +398,14 @@ impl DeleteBucketRequest {
     }
 }
 
+/// Request builder for reading bucket versioning settings.
 pub struct GetBucketVersioningRequest {
     client: Client,
     bucket: String,
 }
 
 impl GetBucketVersioningRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<BucketVersioningConfiguration> {
         let resp = self
             .client
@@ -393,6 +431,7 @@ impl GetBucketVersioningRequest {
     }
 }
 
+/// Request builder for updating bucket versioning settings.
 pub struct PutBucketVersioningRequest {
     client: Client,
     bucket: String,
@@ -400,11 +439,13 @@ pub struct PutBucketVersioningRequest {
 }
 
 impl PutBucketVersioningRequest {
+    /// Sets the versioning configuration to apply.
     pub fn configuration(mut self, value: BucketVersioningConfiguration) -> Self {
         self.configuration = value;
         self
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<PutBucketVersioningOutput> {
         let body = crate::util::xml::encode_bucket_versioning(&self.configuration)?;
         let mut headers = HeaderMap::new();
@@ -437,12 +478,14 @@ impl PutBucketVersioningRequest {
     }
 }
 
+/// Request builder for reading bucket lifecycle configuration.
 pub struct GetBucketLifecycleRequest {
     client: Client,
     bucket: String,
 }
 
 impl GetBucketLifecycleRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<BucketLifecycleConfiguration> {
         let resp = self
             .client
@@ -468,6 +511,7 @@ impl GetBucketLifecycleRequest {
     }
 }
 
+/// Request builder for updating bucket lifecycle configuration.
 pub struct PutBucketLifecycleRequest {
     client: Client,
     bucket: String,
@@ -475,11 +519,13 @@ pub struct PutBucketLifecycleRequest {
 }
 
 impl PutBucketLifecycleRequest {
+    /// Sets the lifecycle configuration to apply.
     pub fn configuration(mut self, value: BucketLifecycleConfiguration) -> Self {
         self.configuration = value;
         self
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<PutBucketLifecycleOutput> {
         let body = crate::util::xml::encode_bucket_lifecycle(&self.configuration)?;
         let mut headers = HeaderMap::new();
@@ -512,12 +558,14 @@ impl PutBucketLifecycleRequest {
     }
 }
 
+/// Request builder for deleting bucket lifecycle configuration.
 pub struct DeleteBucketLifecycleRequest {
     client: Client,
     bucket: String,
 }
 
 impl DeleteBucketLifecycleRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<DeleteBucketLifecycleOutput> {
         let resp = self
             .client
@@ -539,12 +587,14 @@ impl DeleteBucketLifecycleRequest {
     }
 }
 
+/// Request builder for reading bucket CORS configuration.
 pub struct GetBucketCorsRequest {
     client: Client,
     bucket: String,
 }
 
 impl GetBucketCorsRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<BucketCorsConfiguration> {
         let resp = self
             .client
@@ -570,6 +620,7 @@ impl GetBucketCorsRequest {
     }
 }
 
+/// Request builder for updating bucket CORS configuration.
 pub struct PutBucketCorsRequest {
     client: Client,
     bucket: String,
@@ -577,11 +628,13 @@ pub struct PutBucketCorsRequest {
 }
 
 impl PutBucketCorsRequest {
+    /// Sets the CORS configuration to apply.
     pub fn configuration(mut self, value: BucketCorsConfiguration) -> Self {
         self.configuration = value;
         self
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<PutBucketCorsOutput> {
         let body = crate::util::xml::encode_bucket_cors(&self.configuration)?;
         let mut headers = HeaderMap::new();
@@ -614,12 +667,14 @@ impl PutBucketCorsRequest {
     }
 }
 
+/// Request builder for deleting bucket CORS configuration.
 pub struct DeleteBucketCorsRequest {
     client: Client,
     bucket: String,
 }
 
 impl DeleteBucketCorsRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<DeleteBucketCorsOutput> {
         let resp = self
             .client
@@ -641,12 +696,14 @@ impl DeleteBucketCorsRequest {
     }
 }
 
+/// Request builder for reading bucket tags.
 pub struct GetBucketTaggingRequest {
     client: Client,
     bucket: String,
 }
 
 impl GetBucketTaggingRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<BucketTagging> {
         let resp = self
             .client
@@ -672,6 +729,7 @@ impl GetBucketTaggingRequest {
     }
 }
 
+/// Request builder for updating bucket tags.
 pub struct PutBucketTaggingRequest {
     client: Client,
     bucket: String,
@@ -679,11 +737,13 @@ pub struct PutBucketTaggingRequest {
 }
 
 impl PutBucketTaggingRequest {
+    /// Sets the tag set to apply.
     pub fn tagging(mut self, value: BucketTagging) -> Self {
         self.tagging = value;
         self
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<PutBucketTaggingOutput> {
         let body = crate::util::xml::encode_bucket_tagging(&self.tagging)?;
         let mut headers = HeaderMap::new();
@@ -716,12 +776,14 @@ impl PutBucketTaggingRequest {
     }
 }
 
+/// Request builder for deleting bucket tags.
 pub struct DeleteBucketTaggingRequest {
     client: Client,
     bucket: String,
 }
 
 impl DeleteBucketTaggingRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<DeleteBucketTaggingOutput> {
         let resp = self
             .client
@@ -743,12 +805,14 @@ impl DeleteBucketTaggingRequest {
     }
 }
 
+/// Request builder for reading bucket encryption configuration.
 pub struct GetBucketEncryptionRequest {
     client: Client,
     bucket: String,
 }
 
 impl GetBucketEncryptionRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<BucketEncryptionConfiguration> {
         let resp = self
             .client
@@ -774,6 +838,7 @@ impl GetBucketEncryptionRequest {
     }
 }
 
+/// Request builder for updating bucket encryption configuration.
 pub struct PutBucketEncryptionRequest {
     client: Client,
     bucket: String,
@@ -781,11 +846,13 @@ pub struct PutBucketEncryptionRequest {
 }
 
 impl PutBucketEncryptionRequest {
+    /// Sets the encryption configuration to apply.
     pub fn configuration(mut self, value: BucketEncryptionConfiguration) -> Self {
         self.configuration = value;
         self
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<PutBucketEncryptionOutput> {
         let body = crate::util::xml::encode_bucket_encryption(&self.configuration)?;
         let mut headers = HeaderMap::new();
@@ -818,12 +885,14 @@ impl PutBucketEncryptionRequest {
     }
 }
 
+/// Request builder for deleting bucket encryption configuration.
 pub struct DeleteBucketEncryptionRequest {
     client: Client,
     bucket: String,
 }
 
 impl DeleteBucketEncryptionRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<DeleteBucketEncryptionOutput> {
         let resp = self
             .client
@@ -845,12 +914,14 @@ impl DeleteBucketEncryptionRequest {
     }
 }
 
+/// Request builder for reading public access block settings.
 pub struct GetBucketPublicAccessBlockRequest {
     client: Client,
     bucket: String,
 }
 
 impl GetBucketPublicAccessBlockRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<BucketPublicAccessBlockConfiguration> {
         let resp = self
             .client
@@ -876,6 +947,7 @@ impl GetBucketPublicAccessBlockRequest {
     }
 }
 
+/// Request builder for updating public access block settings.
 pub struct PutBucketPublicAccessBlockRequest {
     client: Client,
     bucket: String,
@@ -883,11 +955,13 @@ pub struct PutBucketPublicAccessBlockRequest {
 }
 
 impl PutBucketPublicAccessBlockRequest {
+    /// Sets the public access block configuration to apply.
     pub fn configuration(mut self, value: BucketPublicAccessBlockConfiguration) -> Self {
         self.configuration = value;
         self
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<PutBucketPublicAccessBlockOutput> {
         let body = crate::util::xml::encode_bucket_public_access_block(&self.configuration)?;
         let mut headers = HeaderMap::new();
@@ -920,12 +994,14 @@ impl PutBucketPublicAccessBlockRequest {
     }
 }
 
+/// Request builder for deleting public access block settings.
 pub struct DeleteBucketPublicAccessBlockRequest {
     client: Client,
     bucket: String,
 }
 
 impl DeleteBucketPublicAccessBlockRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<DeleteBucketPublicAccessBlockOutput> {
         let resp = self
             .client
@@ -947,6 +1023,7 @@ impl DeleteBucketPublicAccessBlockRequest {
     }
 }
 
+/// Request builder for fetching raw bucket config XML.
 pub struct GetBucketConfigRawRequest {
     client: Client,
     bucket: String,
@@ -954,6 +1031,7 @@ pub struct GetBucketConfigRawRequest {
 }
 
 impl GetBucketConfigRawRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<String> {
         validate_subresource(&self.subresource)?;
 
@@ -979,6 +1057,7 @@ impl GetBucketConfigRawRequest {
     }
 }
 
+/// Request builder for writing raw bucket config XML.
 pub struct PutBucketConfigRawRequest {
     client: Client,
     bucket: String,
@@ -987,16 +1066,19 @@ pub struct PutBucketConfigRawRequest {
 }
 
 impl PutBucketConfigRawRequest {
+    /// Sets the request body from an XML string.
     pub fn body_xml(mut self, xml: impl Into<String>) -> Self {
         self.body = Bytes::from(xml.into());
         self
     }
 
+    /// Sets the request body from raw bytes.
     pub fn body_bytes(mut self, bytes: impl Into<Bytes>) -> Self {
         self.body = bytes.into();
         self
     }
 
+    /// Sends the request.
     pub async fn send(self) -> Result<()> {
         validate_subresource(&self.subresource)?;
         if self.body.is_empty() {
@@ -1035,6 +1117,7 @@ impl PutBucketConfigRawRequest {
     }
 }
 
+/// Request builder for deleting raw bucket config.
 pub struct DeleteBucketConfigRawRequest {
     client: Client,
     bucket: String,
@@ -1042,6 +1125,7 @@ pub struct DeleteBucketConfigRawRequest {
 }
 
 impl DeleteBucketConfigRawRequest {
+    /// Sends the request.
     pub async fn send(self) -> Result<()> {
         validate_subresource(&self.subresource)?;
 

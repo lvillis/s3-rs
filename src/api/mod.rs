@@ -1,3 +1,5 @@
+//! Service entry points and request builders.
+
 #[cfg(feature = "blocking")]
 mod blocking_buckets;
 #[cfg(feature = "blocking")]

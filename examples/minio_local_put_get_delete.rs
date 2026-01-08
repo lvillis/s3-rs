@@ -5,7 +5,7 @@ use std::{
 };
 
 #[cfg(all(feature = "async", feature = "providers"))]
-use s3::{Auth, Client};
+use s3::Auth;
 
 #[cfg(all(feature = "async", feature = "providers"))]
 #[allow(clippy::result_large_err)]

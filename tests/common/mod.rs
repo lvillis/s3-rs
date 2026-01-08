@@ -101,6 +101,7 @@ pub(crate) fn virtual_hosted_endpoint(original: &str) -> Result<Option<String>, 
 }
 
 #[cfg(feature = "async")]
+#[allow(dead_code)]
 pub(crate) fn build_async_client(
     cfg: &TestConfig,
     style: AddressingStyle,
@@ -113,6 +114,7 @@ pub(crate) fn build_async_client(
 }
 
 #[cfg(feature = "blocking")]
+#[allow(dead_code)]
 pub(crate) fn build_blocking_client(
     cfg: &TestConfig,
     style: AddressingStyle,
@@ -125,6 +127,7 @@ pub(crate) fn build_blocking_client(
 }
 
 #[cfg(feature = "async")]
+#[allow(dead_code)]
 pub(crate) async fn with_bucket_async<F, Fut>(
     client: &s3::Client,
     prefix: &str,
@@ -161,6 +164,7 @@ where
 }
 
 #[cfg(feature = "async")]
+#[allow(dead_code)]
 async fn cleanup_bucket_async(client: &s3::Client, bucket: &str) -> Result<(), Error> {
     use http::StatusCode;
 
@@ -180,6 +184,7 @@ async fn cleanup_bucket_async(client: &s3::Client, bucket: &str) -> Result<(), E
 }
 
 #[cfg(feature = "async")]
+#[allow(dead_code)]
 async fn delete_all_objects_async(client: &s3::Client, bucket: &str) -> Result<(), Error> {
     use http::StatusCode;
 
@@ -213,6 +218,7 @@ async fn delete_all_objects_async(client: &s3::Client, bucket: &str) -> Result<(
 }
 
 #[cfg(feature = "blocking")]
+#[allow(dead_code)]
 pub(crate) fn with_bucket_blocking<F>(
     client: &s3::BlockingClient,
     prefix: &str,
@@ -243,6 +249,7 @@ where
 }
 
 #[cfg(feature = "blocking")]
+#[allow(dead_code)]
 fn cleanup_bucket_blocking(client: &s3::BlockingClient, bucket: &str) -> Result<(), Error> {
     use http::StatusCode;
 
@@ -262,6 +269,7 @@ fn cleanup_bucket_blocking(client: &s3::BlockingClient, bucket: &str) -> Result<
 }
 
 #[cfg(feature = "blocking")]
+#[allow(dead_code)]
 fn delete_all_objects_blocking(client: &s3::BlockingClient, bucket: &str) -> Result<(), Error> {
     use http::StatusCode;
 

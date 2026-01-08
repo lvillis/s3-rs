@@ -121,6 +121,7 @@ rustls = [
 native-tls = ["reqwest?/native-tls", "ureq?/native-tls"]
 
 # Optional escape hatch
+allow-both-tls = []
 unstable-raw = []
 
 [[bench]]

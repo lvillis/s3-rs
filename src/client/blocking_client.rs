@@ -12,11 +12,13 @@ use crate::{
     util,
 };
 
+/// Blocking S3 client.
 #[derive(Clone)]
 pub struct BlockingClient {
     inner: Arc<Inner>,
 }
 
+/// Builder for [`BlockingClient`].
 pub struct BlockingClientBuilder {
     endpoint: Url,
     region: Option<String>,
@@ -36,14 +38,17 @@ struct Inner {
 }
 
 impl BlockingClient {
+    /// Creates a client builder from an endpoint URL.
     pub fn builder(endpoint: impl AsRef<str>) -> Result<BlockingClientBuilder> {
         BlockingClientBuilder::new(endpoint.as_ref())
     }
 
+    /// Returns the objects service.
     pub fn objects(&self) -> api::BlockingObjectsService {
         api::BlockingObjectsService::new(self.clone())
     }
 
+    /// Returns the buckets service.
     pub fn buckets(&self) -> api::BlockingBucketsService {
         api::BlockingBucketsService::new(self.clone())
     }
@@ -179,46 +184,55 @@ impl BlockingClientBuilder {
         })
     }
 
+    /// Sets the region used for signing.
     pub fn region(mut self, region: impl Into<String>) -> Self {
         self.region = Some(region.into());
         self
     }
 
+    /// Sets the authentication strategy.
     pub fn auth(mut self, auth: Auth) -> Self {
         self.auth = auth;
         self
     }
 
+    /// Sets the bucket addressing style.
     pub fn addressing_style(mut self, style: AddressingStyle) -> Self {
         self.addressing = style;
         self
     }
 
+    /// Sets a per-request timeout.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
 
+    /// Sets the maximum number of retry attempts.
     pub fn max_attempts(mut self, max_attempts: u32) -> Self {
         self.retry.max_attempts = max_attempts.max(1);
         self
     }
 
+    /// Sets the base delay for retries.
     pub fn base_retry_delay(mut self, delay: Duration) -> Self {
         self.retry.base_delay = delay;
         self
     }
 
+    /// Sets the maximum delay for retries.
     pub fn max_retry_delay(mut self, delay: Duration) -> Self {
         self.retry.max_delay = delay;
         self
     }
 
+    /// Overrides the default user agent.
     pub fn user_agent(mut self, user_agent: impl Into<String>) -> Self {
         self.user_agent = Some(user_agent.into());
         self
     }
 
+    /// Builds the client after validating configuration.
     pub fn build(self) -> Result<BlockingClient> {
         let region = self
             .region

@@ -7,7 +7,7 @@
 //! # async fn demo() -> Result<(), s3::Error> {
 //! use s3::{Auth, Client};
 //!
-//! let client = Client::builder("https://s3.amazonaws.com")?
+//! let client = Client::builder("https://s3.example.com")?
 //!     .region("us-east-1")
 //!     .auth(Auth::from_env()?)
 //!     .build()?;
@@ -30,7 +30,7 @@
 //! # fn demo() -> Result<(), s3::Error> {
 //! use s3::{Auth, BlockingClient};
 //!
-//! let client = BlockingClient::builder("https://s3.amazonaws.com")?
+//! let client = BlockingClient::builder("https://s3.example.com")?
 //!     .region("us-east-1")
 //!     .auth(Auth::from_env()?)
 //!     .build()?;
@@ -44,14 +44,21 @@
 //!
 //! ## Design
 //!
-//! See `docs/prd/prd.md`.
+//! See README for product intent and usage.
 
-#[cfg(all(feature = "rustls", feature = "native-tls"))]
+#[cfg(all(
+    feature = "rustls",
+    feature = "native-tls",
+    not(feature = "allow-both-tls")
+))]
 compile_error!("Enable only one of: rustls, native-tls.");
 
+/// Service entry points and request builders.
 pub mod api;
 #[cfg(feature = "providers")]
+/// Endpoint presets for common S3-compatible services.
 pub mod providers;
+/// Shared request/response types.
 pub mod types;
 
 mod auth;

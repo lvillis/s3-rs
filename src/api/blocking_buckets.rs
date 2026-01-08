@@ -1,3 +1,5 @@
+//! Blocking bucket operations.
+
 use bytes::Bytes;
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
 
@@ -18,6 +20,7 @@ use crate::{
     },
 };
 
+/// Bucket operations service (blocking).
 #[derive(Clone)]
 pub struct BlockingBucketsService {
     client: BlockingClient,
@@ -28,12 +31,14 @@ impl BlockingBucketsService {
         Self { client }
     }
 
+    /// Starts a request to list buckets.
     pub fn list(&self) -> BlockingListBucketsRequest {
         BlockingListBucketsRequest {
             client: self.client.clone(),
         }
     }
 
+    /// Starts a request to check if a bucket exists.
     pub fn head(&self, bucket: impl Into<String>) -> BlockingHeadBucketRequest {
         BlockingHeadBucketRequest {
             client: self.client.clone(),
@@ -41,6 +46,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to create a bucket.
     pub fn create(&self, bucket: impl Into<String>) -> BlockingCreateBucketRequest {
         BlockingCreateBucketRequest {
             client: self.client.clone(),
@@ -49,6 +55,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to delete a bucket.
     pub fn delete(&self, bucket: impl Into<String>) -> BlockingDeleteBucketRequest {
         BlockingDeleteBucketRequest {
             client: self.client.clone(),
@@ -56,6 +63,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to get bucket versioning.
     pub fn get_versioning(&self, bucket: impl Into<String>) -> BlockingGetBucketVersioningRequest {
         BlockingGetBucketVersioningRequest {
             client: self.client.clone(),
@@ -63,6 +71,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to set bucket versioning.
     pub fn put_versioning(&self, bucket: impl Into<String>) -> BlockingPutBucketVersioningRequest {
         BlockingPutBucketVersioningRequest {
             client: self.client.clone(),
@@ -71,6 +80,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to get bucket lifecycle configuration.
     pub fn get_lifecycle(&self, bucket: impl Into<String>) -> BlockingGetBucketLifecycleRequest {
         BlockingGetBucketLifecycleRequest {
             client: self.client.clone(),
@@ -78,6 +88,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to set bucket lifecycle configuration.
     pub fn put_lifecycle(&self, bucket: impl Into<String>) -> BlockingPutBucketLifecycleRequest {
         BlockingPutBucketLifecycleRequest {
             client: self.client.clone(),
@@ -86,6 +97,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to delete bucket lifecycle configuration.
     pub fn delete_lifecycle(
         &self,
         bucket: impl Into<String>,
@@ -96,6 +108,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to get bucket CORS rules.
     pub fn get_cors(&self, bucket: impl Into<String>) -> BlockingGetBucketCorsRequest {
         BlockingGetBucketCorsRequest {
             client: self.client.clone(),
@@ -103,6 +116,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to set bucket CORS rules.
     pub fn put_cors(&self, bucket: impl Into<String>) -> BlockingPutBucketCorsRequest {
         BlockingPutBucketCorsRequest {
             client: self.client.clone(),
@@ -111,6 +125,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to delete bucket CORS rules.
     pub fn delete_cors(&self, bucket: impl Into<String>) -> BlockingDeleteBucketCorsRequest {
         BlockingDeleteBucketCorsRequest {
             client: self.client.clone(),
@@ -118,6 +133,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to get bucket tags.
     pub fn get_tagging(&self, bucket: impl Into<String>) -> BlockingGetBucketTaggingRequest {
         BlockingGetBucketTaggingRequest {
             client: self.client.clone(),
@@ -125,6 +141,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to set bucket tags.
     pub fn put_tagging(&self, bucket: impl Into<String>) -> BlockingPutBucketTaggingRequest {
         BlockingPutBucketTaggingRequest {
             client: self.client.clone(),
@@ -133,6 +150,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to delete bucket tags.
     pub fn delete_tagging(&self, bucket: impl Into<String>) -> BlockingDeleteBucketTaggingRequest {
         BlockingDeleteBucketTaggingRequest {
             client: self.client.clone(),
@@ -140,6 +158,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to get bucket encryption configuration.
     pub fn get_encryption(&self, bucket: impl Into<String>) -> BlockingGetBucketEncryptionRequest {
         BlockingGetBucketEncryptionRequest {
             client: self.client.clone(),
@@ -147,6 +166,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to set bucket encryption configuration.
     pub fn put_encryption(&self, bucket: impl Into<String>) -> BlockingPutBucketEncryptionRequest {
         BlockingPutBucketEncryptionRequest {
             client: self.client.clone(),
@@ -155,6 +175,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to delete bucket encryption configuration.
     pub fn delete_encryption(
         &self,
         bucket: impl Into<String>,
@@ -165,6 +186,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to get public access block settings.
     pub fn get_public_access_block(
         &self,
         bucket: impl Into<String>,
@@ -175,6 +197,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to set public access block settings.
     pub fn put_public_access_block(
         &self,
         bucket: impl Into<String>,
@@ -186,6 +209,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to delete public access block settings.
     pub fn delete_public_access_block(
         &self,
         bucket: impl Into<String>,
@@ -196,6 +220,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to read a raw bucket config subresource.
     pub fn get_config_raw(
         &self,
         bucket: impl Into<String>,
@@ -208,6 +233,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to write a raw bucket config subresource.
     pub fn put_config_raw(
         &self,
         bucket: impl Into<String>,
@@ -221,6 +247,7 @@ impl BlockingBucketsService {
         }
     }
 
+    /// Starts a request to delete a raw bucket config subresource.
     pub fn delete_config_raw(
         &self,
         bucket: impl Into<String>,
@@ -234,11 +261,13 @@ impl BlockingBucketsService {
     }
 }
 
+/// Request builder for listing buckets.
 pub struct BlockingListBucketsRequest {
     client: BlockingClient,
 }
 
 impl BlockingListBucketsRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<ListBucketsOutput> {
         let resp = self.client.execute(
             Method::GET,
@@ -261,12 +290,14 @@ impl BlockingListBucketsRequest {
     }
 }
 
+/// Request builder for checking bucket existence.
 pub struct BlockingHeadBucketRequest {
     client: BlockingClient,
     bucket: String,
 }
 
 impl BlockingHeadBucketRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<HeadBucketOutput> {
         let resp = self.client.execute(
             Method::HEAD,
@@ -289,6 +320,7 @@ impl BlockingHeadBucketRequest {
     }
 }
 
+/// Request builder for creating a bucket.
 pub struct BlockingCreateBucketRequest {
     client: BlockingClient,
     bucket: String,
@@ -296,11 +328,13 @@ pub struct BlockingCreateBucketRequest {
 }
 
 impl BlockingCreateBucketRequest {
+    /// Sets the location constraint for bucket creation.
     pub fn location_constraint(mut self, region: impl Into<String>) -> Self {
         self.location_constraint = Some(region.into());
         self
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<CreateBucketOutput> {
         let mut headers = HeaderMap::new();
         let body = match self.location_constraint {
@@ -338,12 +372,14 @@ impl BlockingCreateBucketRequest {
     }
 }
 
+/// Request builder for deleting a bucket.
 pub struct BlockingDeleteBucketRequest {
     client: BlockingClient,
     bucket: String,
 }
 
 impl BlockingDeleteBucketRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<DeleteBucketOutput> {
         let resp = self.client.execute(
             Method::DELETE,
@@ -364,12 +400,14 @@ impl BlockingDeleteBucketRequest {
     }
 }
 
+/// Request builder for reading bucket versioning settings.
 pub struct BlockingGetBucketVersioningRequest {
     client: BlockingClient,
     bucket: String,
 }
 
 impl BlockingGetBucketVersioningRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<BucketVersioningConfiguration> {
         let resp = self.client.execute(
             Method::GET,
@@ -392,6 +430,7 @@ impl BlockingGetBucketVersioningRequest {
     }
 }
 
+/// Request builder for updating bucket versioning settings.
 pub struct BlockingPutBucketVersioningRequest {
     client: BlockingClient,
     bucket: String,
@@ -399,11 +438,13 @@ pub struct BlockingPutBucketVersioningRequest {
 }
 
 impl BlockingPutBucketVersioningRequest {
+    /// Sets the versioning configuration to apply.
     pub fn configuration(mut self, value: BucketVersioningConfiguration) -> Self {
         self.configuration = value;
         self
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<PutBucketVersioningOutput> {
         let body = crate::util::xml::encode_bucket_versioning(&self.configuration)?;
         let mut headers = HeaderMap::new();
@@ -435,12 +476,14 @@ impl BlockingPutBucketVersioningRequest {
     }
 }
 
+/// Request builder for reading bucket lifecycle configuration.
 pub struct BlockingGetBucketLifecycleRequest {
     client: BlockingClient,
     bucket: String,
 }
 
 impl BlockingGetBucketLifecycleRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<BucketLifecycleConfiguration> {
         let resp = self.client.execute(
             Method::GET,
@@ -463,6 +506,7 @@ impl BlockingGetBucketLifecycleRequest {
     }
 }
 
+/// Request builder for updating bucket lifecycle configuration.
 pub struct BlockingPutBucketLifecycleRequest {
     client: BlockingClient,
     bucket: String,
@@ -470,11 +514,13 @@ pub struct BlockingPutBucketLifecycleRequest {
 }
 
 impl BlockingPutBucketLifecycleRequest {
+    /// Sets the lifecycle configuration to apply.
     pub fn configuration(mut self, value: BucketLifecycleConfiguration) -> Self {
         self.configuration = value;
         self
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<PutBucketLifecycleOutput> {
         let body = crate::util::xml::encode_bucket_lifecycle(&self.configuration)?;
         let mut headers = HeaderMap::new();
@@ -506,12 +552,14 @@ impl BlockingPutBucketLifecycleRequest {
     }
 }
 
+/// Request builder for deleting bucket lifecycle configuration.
 pub struct BlockingDeleteBucketLifecycleRequest {
     client: BlockingClient,
     bucket: String,
 }
 
 impl BlockingDeleteBucketLifecycleRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<DeleteBucketLifecycleOutput> {
         let resp = self.client.execute(
             Method::DELETE,
@@ -532,12 +580,14 @@ impl BlockingDeleteBucketLifecycleRequest {
     }
 }
 
+/// Request builder for reading bucket CORS configuration.
 pub struct BlockingGetBucketCorsRequest {
     client: BlockingClient,
     bucket: String,
 }
 
 impl BlockingGetBucketCorsRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<BucketCorsConfiguration> {
         let resp = self.client.execute(
             Method::GET,
@@ -560,6 +610,7 @@ impl BlockingGetBucketCorsRequest {
     }
 }
 
+/// Request builder for updating bucket CORS configuration.
 pub struct BlockingPutBucketCorsRequest {
     client: BlockingClient,
     bucket: String,
@@ -567,11 +618,13 @@ pub struct BlockingPutBucketCorsRequest {
 }
 
 impl BlockingPutBucketCorsRequest {
+    /// Sets the CORS configuration to apply.
     pub fn configuration(mut self, value: BucketCorsConfiguration) -> Self {
         self.configuration = value;
         self
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<PutBucketCorsOutput> {
         let body = crate::util::xml::encode_bucket_cors(&self.configuration)?;
         let mut headers = HeaderMap::new();
@@ -603,12 +656,14 @@ impl BlockingPutBucketCorsRequest {
     }
 }
 
+/// Request builder for deleting bucket CORS configuration.
 pub struct BlockingDeleteBucketCorsRequest {
     client: BlockingClient,
     bucket: String,
 }
 
 impl BlockingDeleteBucketCorsRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<DeleteBucketCorsOutput> {
         let resp = self.client.execute(
             Method::DELETE,
@@ -629,12 +684,14 @@ impl BlockingDeleteBucketCorsRequest {
     }
 }
 
+/// Request builder for reading bucket tags.
 pub struct BlockingGetBucketTaggingRequest {
     client: BlockingClient,
     bucket: String,
 }
 
 impl BlockingGetBucketTaggingRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<BucketTagging> {
         let resp = self.client.execute(
             Method::GET,
@@ -657,6 +714,7 @@ impl BlockingGetBucketTaggingRequest {
     }
 }
 
+/// Request builder for updating bucket tags.
 pub struct BlockingPutBucketTaggingRequest {
     client: BlockingClient,
     bucket: String,
@@ -664,11 +722,13 @@ pub struct BlockingPutBucketTaggingRequest {
 }
 
 impl BlockingPutBucketTaggingRequest {
+    /// Sets the tag set to apply.
     pub fn tagging(mut self, value: BucketTagging) -> Self {
         self.tagging = value;
         self
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<PutBucketTaggingOutput> {
         let body = crate::util::xml::encode_bucket_tagging(&self.tagging)?;
         let mut headers = HeaderMap::new();
@@ -700,12 +760,14 @@ impl BlockingPutBucketTaggingRequest {
     }
 }
 
+/// Request builder for deleting bucket tags.
 pub struct BlockingDeleteBucketTaggingRequest {
     client: BlockingClient,
     bucket: String,
 }
 
 impl BlockingDeleteBucketTaggingRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<DeleteBucketTaggingOutput> {
         let resp = self.client.execute(
             Method::DELETE,
@@ -726,12 +788,14 @@ impl BlockingDeleteBucketTaggingRequest {
     }
 }
 
+/// Request builder for reading bucket encryption configuration.
 pub struct BlockingGetBucketEncryptionRequest {
     client: BlockingClient,
     bucket: String,
 }
 
 impl BlockingGetBucketEncryptionRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<BucketEncryptionConfiguration> {
         let resp = self.client.execute(
             Method::GET,
@@ -754,6 +818,7 @@ impl BlockingGetBucketEncryptionRequest {
     }
 }
 
+/// Request builder for updating bucket encryption configuration.
 pub struct BlockingPutBucketEncryptionRequest {
     client: BlockingClient,
     bucket: String,
@@ -761,11 +826,13 @@ pub struct BlockingPutBucketEncryptionRequest {
 }
 
 impl BlockingPutBucketEncryptionRequest {
+    /// Sets the encryption configuration to apply.
     pub fn configuration(mut self, value: BucketEncryptionConfiguration) -> Self {
         self.configuration = value;
         self
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<PutBucketEncryptionOutput> {
         let body = crate::util::xml::encode_bucket_encryption(&self.configuration)?;
         let mut headers = HeaderMap::new();
@@ -797,12 +864,14 @@ impl BlockingPutBucketEncryptionRequest {
     }
 }
 
+/// Request builder for deleting bucket encryption configuration.
 pub struct BlockingDeleteBucketEncryptionRequest {
     client: BlockingClient,
     bucket: String,
 }
 
 impl BlockingDeleteBucketEncryptionRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<DeleteBucketEncryptionOutput> {
         let resp = self.client.execute(
             Method::DELETE,
@@ -823,12 +892,14 @@ impl BlockingDeleteBucketEncryptionRequest {
     }
 }
 
+/// Request builder for reading public access block settings.
 pub struct BlockingGetBucketPublicAccessBlockRequest {
     client: BlockingClient,
     bucket: String,
 }
 
 impl BlockingGetBucketPublicAccessBlockRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<BucketPublicAccessBlockConfiguration> {
         let resp = self.client.execute(
             Method::GET,
@@ -851,6 +922,7 @@ impl BlockingGetBucketPublicAccessBlockRequest {
     }
 }
 
+/// Request builder for updating public access block settings.
 pub struct BlockingPutBucketPublicAccessBlockRequest {
     client: BlockingClient,
     bucket: String,
@@ -858,11 +930,13 @@ pub struct BlockingPutBucketPublicAccessBlockRequest {
 }
 
 impl BlockingPutBucketPublicAccessBlockRequest {
+    /// Sets the public access block configuration to apply.
     pub fn configuration(mut self, value: BucketPublicAccessBlockConfiguration) -> Self {
         self.configuration = value;
         self
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<PutBucketPublicAccessBlockOutput> {
         let body = crate::util::xml::encode_bucket_public_access_block(&self.configuration)?;
         let mut headers = HeaderMap::new();
@@ -894,12 +968,14 @@ impl BlockingPutBucketPublicAccessBlockRequest {
     }
 }
 
+/// Request builder for deleting public access block settings.
 pub struct BlockingDeleteBucketPublicAccessBlockRequest {
     client: BlockingClient,
     bucket: String,
 }
 
 impl BlockingDeleteBucketPublicAccessBlockRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<DeleteBucketPublicAccessBlockOutput> {
         let resp = self.client.execute(
             Method::DELETE,
@@ -920,6 +996,7 @@ impl BlockingDeleteBucketPublicAccessBlockRequest {
     }
 }
 
+/// Request builder for fetching raw bucket config XML.
 pub struct BlockingGetBucketConfigRawRequest {
     client: BlockingClient,
     bucket: String,
@@ -927,6 +1004,7 @@ pub struct BlockingGetBucketConfigRawRequest {
 }
 
 impl BlockingGetBucketConfigRawRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<String> {
         validate_subresource(&self.subresource)?;
 
@@ -950,6 +1028,7 @@ impl BlockingGetBucketConfigRawRequest {
     }
 }
 
+/// Request builder for writing raw bucket config XML.
 pub struct BlockingPutBucketConfigRawRequest {
     client: BlockingClient,
     bucket: String,
@@ -958,16 +1037,19 @@ pub struct BlockingPutBucketConfigRawRequest {
 }
 
 impl BlockingPutBucketConfigRawRequest {
+    /// Sets the request body from an XML string.
     pub fn body_xml(mut self, xml: impl Into<String>) -> Self {
         self.body = Bytes::from(xml.into());
         self
     }
 
+    /// Sets the request body from raw bytes.
     pub fn body_bytes(mut self, bytes: impl Into<Bytes>) -> Self {
         self.body = bytes.into();
         self
     }
 
+    /// Sends the request.
     pub fn send(self) -> Result<()> {
         validate_subresource(&self.subresource)?;
         if self.body.is_empty() {
@@ -1005,6 +1087,7 @@ impl BlockingPutBucketConfigRawRequest {
     }
 }
 
+/// Request builder for deleting raw bucket config.
 pub struct BlockingDeleteBucketConfigRawRequest {
     client: BlockingClient,
     bucket: String,
@@ -1012,6 +1095,7 @@ pub struct BlockingDeleteBucketConfigRawRequest {
 }
 
 impl BlockingDeleteBucketConfigRawRequest {
+    /// Sends the request.
     pub fn send(self) -> Result<()> {
         validate_subresource(&self.subresource)?;
 

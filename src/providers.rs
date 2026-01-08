@@ -1,16 +1,25 @@
+//! Endpoint presets for common S3-compatible services.
+
 use crate::{AddressingStyle, Error, Result};
 
+/// Common AWS regions for presets.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AwsRegion {
+    /// us-east-1
     UsEast1,
+    /// us-west-2
     UsWest2,
+    /// eu-west-1
     EuWest1,
+    /// ap-southeast-1
     ApSoutheast1,
+    /// Custom region string.
     Other(String),
 }
 
 impl AwsRegion {
+    /// Creates a custom region variant.
     pub fn other(value: impl Into<String>) -> Result<Self> {
         let value = value.into();
         if value.trim().is_empty() {
@@ -19,6 +28,7 @@ impl AwsRegion {
         Ok(Self::Other(value))
     }
 
+    /// Returns the region identifier.
     pub fn as_str(&self) -> &str {
         match self {
             Self::UsEast1 => "us-east-1",
@@ -48,6 +58,7 @@ impl std::str::FromStr for AwsRegion {
     }
 }
 
+/// A preconfigured endpoint + region + addressing style.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Preset {
     endpoint: String,
@@ -56,18 +67,22 @@ pub struct Preset {
 }
 
 impl Preset {
+    /// Returns the service endpoint URL.
     pub fn endpoint(&self) -> &str {
         &self.endpoint
     }
 
+    /// Returns the signing region.
     pub fn region(&self) -> &str {
         &self.region
     }
 
+    /// Returns the addressing style to use.
     pub fn addressing_style(&self) -> AddressingStyle {
         self.addressing_style
     }
 
+    /// Builds an async client builder from the preset.
     #[cfg(feature = "async")]
     pub fn async_client_builder(&self) -> Result<crate::ClientBuilder> {
         crate::Client::builder(&self.endpoint).map(|b| {
@@ -76,6 +91,7 @@ impl Preset {
         })
     }
 
+    /// Builds a blocking client builder from the preset.
     #[cfg(feature = "blocking")]
     pub fn blocking_client_builder(&self) -> Result<crate::BlockingClientBuilder> {
         crate::BlockingClient::builder(&self.endpoint).map(|b| {
@@ -85,6 +101,7 @@ impl Preset {
     }
 }
 
+/// Builds a preset for AWS S3.
 pub fn aws_s3(region: impl AsRef<str>) -> Result<Preset> {
     let region = region.as_ref().trim();
     if region.is_empty() {
@@ -110,10 +127,12 @@ pub fn aws_s3(region: impl AsRef<str>) -> Result<Preset> {
     })
 }
 
+/// Builds a preset for AWS S3 using a typed region.
 pub fn aws_s3_region(region: AwsRegion) -> Result<Preset> {
     aws_s3(region.as_str())
 }
 
+/// Builds a preset for Cloudflare R2.
 pub fn cloudflare_r2(account_id: impl AsRef<str>) -> Result<Preset> {
     let account_id = account_id.as_ref().trim();
     if account_id.is_empty() {
@@ -127,6 +146,7 @@ pub fn cloudflare_r2(account_id: impl AsRef<str>) -> Result<Preset> {
     })
 }
 
+/// Local MinIO preset for development.
 pub fn minio_local() -> Preset {
     Preset {
         endpoint: "http://127.0.0.1:9000".to_string(),
@@ -138,11 +158,16 @@ pub fn minio_local() -> Preset {
 pub mod aws {
     use super::{AwsRegion, Preset, Result, aws_s3_region};
 
+    /// us-east-1.
     pub const US_EAST_1: AwsRegion = AwsRegion::UsEast1;
+    /// us-west-2.
     pub const US_WEST_2: AwsRegion = AwsRegion::UsWest2;
+    /// eu-west-1.
     pub const EU_WEST_1: AwsRegion = AwsRegion::EuWest1;
+    /// ap-southeast-1.
     pub const AP_SOUTHEAST_1: AwsRegion = AwsRegion::ApSoutheast1;
 
+    /// Builds an AWS S3 preset from a typed region.
     pub fn s3(region: AwsRegion) -> Result<Preset> {
         aws_s3_region(region)
     }

@@ -2,23 +2,25 @@ use std::{error::Error as StdError, fmt, time::Duration};
 
 use http::StatusCode;
 
+/// Library result type.
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Error type for request building, transport, and API responses.
 #[non_exhaustive]
 pub enum Error {
-    InvalidConfig {
-        message: String,
-    },
+    /// Invalid configuration or parameters.
+    InvalidConfig { message: String },
 
-    Signing {
-        message: String,
-    },
+    /// Request signing failed.
+    Signing { message: String },
 
+    /// Request was throttled by the service.
     RateLimited {
         retry_after: Option<Duration>,
         request_id: Option<String>,
     },
 
+    /// Service returned an error response.
     Api {
         status: StatusCode,
         code: Option<String>,
@@ -28,11 +30,13 @@ pub enum Error {
         body_snippet: Option<String>,
     },
 
+    /// Transport-level failure (HTTP client, IO, TLS).
     Transport {
         message: String,
         source: Option<Box<dyn StdError + Send + Sync + 'static>>,
     },
 
+    /// Response decode or parse failure.
     Decode {
         message: String,
         source: Option<Box<dyn StdError + Send + Sync + 'static>>,
@@ -88,18 +92,21 @@ impl fmt::Debug for Error {
 }
 
 impl Error {
+    /// Creates an invalid configuration error.
     pub fn invalid_config(message: impl Into<String>) -> Self {
         Self::InvalidConfig {
             message: message.into(),
         }
     }
 
+    /// Creates a signing error.
     pub fn signing(message: impl Into<String>) -> Self {
         Self::Signing {
             message: message.into(),
         }
     }
 
+    /// Creates a transport error with optional source.
     pub fn transport(
         message: impl Into<String>,
         source: Option<Box<dyn StdError + Send + Sync + 'static>>,
@@ -110,6 +117,7 @@ impl Error {
         }
     }
 
+    /// Creates a decode error with optional source.
     pub fn decode(
         message: impl Into<String>,
         source: Option<Box<dyn StdError + Send + Sync + 'static>>,
@@ -120,6 +128,7 @@ impl Error {
         }
     }
 
+    /// Returns an HTTP status when available.
     pub fn status(&self) -> Option<StatusCode> {
         match self {
             Self::Api { status, .. } => Some(*status),
@@ -131,6 +140,7 @@ impl Error {
         }
     }
 
+    /// Returns the request id if reported by the service.
     pub fn request_id(&self) -> Option<&str> {
         match self {
             Self::Api { request_id, .. } | Self::RateLimited { request_id, .. } => {
@@ -143,6 +153,7 @@ impl Error {
         }
     }
 
+    /// Returns true if the error is safe to retry.
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::RateLimited { .. } => true,
