@@ -1,3 +1,8 @@
+## [0.1.6] - 2026-01-08
+
+### ⚙️ Miscellaneous Tasks
+
+- *(docs)* Expand rustdoc coverage and stabilize all-features tests
 ## [0.1.5] - 2026-01-06
 
 ### 🧪 Testing
@@ -8,6 +13,7 @@
 ### ⚙️ Miscellaneous Tasks
 
 - Add rustfs integration tests
+- Release s3 version 0.1.5
 ## [0.1.4] - 2026-01-06
 
 ### 🧪 Testing
