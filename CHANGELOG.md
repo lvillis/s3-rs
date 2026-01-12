@@ -1,8 +1,14 @@
+## [0.1.7] - 2026-01-12
+
+### 🚀 Features
+
+- *(providers)* Add typed R2 endpoints with jurisdiction support
 ## [0.1.6] - 2026-01-08
 
 ### ⚙️ Miscellaneous Tasks
 
 - *(docs)* Expand rustdoc coverage and stabilize all-features tests
+- Release s3 version 0.1.6
 ## [0.1.5] - 2026-01-06
 
 ### 🧪 Testing
