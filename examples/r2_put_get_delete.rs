@@ -47,7 +47,25 @@ async fn main() -> Result<(), s3::Error> {
         creds = creds.with_session_token(token)?;
     }
 
-    let preset = s3::providers::cloudflare_r2(account_id)?;
+    let jurisdiction = env::var("R2_JURISDICTION").ok();
+    let endpoint = match jurisdiction
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        Some(value) => {
+            let jurisdiction = match value.parse::<s3::providers::R2Jurisdiction>() {
+                Ok(v) => v,
+                Err(_) => {
+                    eprintln!("R2_JURISDICTION must be one of: eu, fedramp");
+                    return Ok(());
+                }
+            };
+            s3::providers::R2Endpoint::Jurisdiction(jurisdiction)
+        }
+        None => s3::providers::R2Endpoint::Global,
+    };
+    let preset = s3::providers::cloudflare_r2(&account_id, endpoint)?;
     let client = preset
         .async_client_builder()?
         .auth(Auth::Static(creds))

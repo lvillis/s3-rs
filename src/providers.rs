@@ -58,6 +58,64 @@ impl std::str::FromStr for AwsRegion {
     }
 }
 
+/// Jurisdictions supported by Cloudflare R2.
+///
+/// Buckets created with Jurisdictional Restrictions are only accessible through an endpoint that
+/// includes the jurisdiction in the host.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum R2Jurisdiction {
+    /// `eu` (European Union).
+    Eu,
+    /// `fedramp` (FedRAMP).
+    Fedramp,
+}
+
+impl R2Jurisdiction {
+    /// Returns the jurisdiction identifier.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Eu => "eu",
+            Self::Fedramp => "fedramp",
+        }
+    }
+}
+
+impl std::str::FromStr for R2Jurisdiction {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "eu" => Ok(Self::Eu),
+            "fedramp" => Ok(Self::Fedramp),
+            _ => Err(Error::invalid_config(
+                "unknown R2 jurisdiction (expected: eu, fedramp)",
+            )),
+        }
+    }
+}
+
+/// Cloudflare R2 endpoint selection.
+///
+/// When using a jurisdiction endpoint, you cannot access buckets outside that jurisdiction.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum R2Endpoint {
+    /// Global endpoint: `https://<account_id>.r2.cloudflarestorage.com`
+    Global,
+    /// Jurisdiction endpoint: `https://<account_id>.<jurisdiction>.r2.cloudflarestorage.com`
+    Jurisdiction(R2Jurisdiction),
+}
+
+impl R2Endpoint {
+    /// Shortcut for the global endpoint.
+    pub const GLOBAL: Self = Self::Global;
+    /// Shortcut for the `eu` jurisdiction endpoint.
+    pub const EU: Self = Self::Jurisdiction(R2Jurisdiction::Eu);
+    /// Shortcut for the `fedramp` jurisdiction endpoint.
+    pub const FEDRAMP: Self = Self::Jurisdiction(R2Jurisdiction::Fedramp);
+}
+
 /// A preconfigured endpoint + region + addressing style.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Preset {
@@ -132,15 +190,38 @@ pub fn aws_s3_region(region: AwsRegion) -> Result<Preset> {
     aws_s3(region.as_str())
 }
 
-/// Builds a preset for Cloudflare R2.
-pub fn cloudflare_r2(account_id: impl AsRef<str>) -> Result<Preset> {
+/// Builds a Cloudflare R2 preset.
+///
+/// Use [`R2Endpoint::Global`] for normal buckets, and [`R2Endpoint::Jurisdiction`] (for example
+/// [`R2Endpoint::EU`]) for buckets created with Jurisdictional Restrictions.
+///
+/// This preset uses region `auto` and path-style addressing.
+pub fn cloudflare_r2(account_id: impl AsRef<str>, endpoint: R2Endpoint) -> Result<Preset> {
     let account_id = account_id.as_ref().trim();
     if account_id.is_empty() {
         return Err(Error::invalid_config("account_id must not be empty"));
     }
 
+    let invalid = account_id.starts_with('-')
+        || account_id.ends_with('-')
+        || !account_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-');
+    if invalid {
+        return Err(Error::invalid_config("account_id must be a DNS label"));
+    }
+
+    let account_id = account_id.to_ascii_lowercase();
+    let endpoint = match endpoint {
+        R2Endpoint::Global => format!("https://{account_id}.r2.cloudflarestorage.com"),
+        R2Endpoint::Jurisdiction(jurisdiction) => format!(
+            "https://{account_id}.{}.r2.cloudflarestorage.com",
+            jurisdiction.as_str()
+        ),
+    };
+
     Ok(Preset {
-        endpoint: format!("https://{account_id}.r2.cloudflarestorage.com"),
+        endpoint,
         region: "auto".to_string(),
         addressing_style: AddressingStyle::Path,
     })
@@ -179,8 +260,27 @@ mod tests {
 
     #[test]
     fn cloudflare_r2_uses_path_and_auto_region() {
-        let preset = cloudflare_r2("123").unwrap();
+        let preset = cloudflare_r2("123", R2Endpoint::Global).unwrap();
         assert_eq!(preset.endpoint(), "https://123.r2.cloudflarestorage.com");
+        assert_eq!(preset.region(), "auto");
+        assert_eq!(preset.addressing_style(), AddressingStyle::Path);
+    }
+
+    #[test]
+    fn cloudflare_r2_endpoint_eu_uses_jurisdiction_host() {
+        let preset = cloudflare_r2("123", R2Endpoint::EU).unwrap();
+        assert_eq!(preset.endpoint(), "https://123.eu.r2.cloudflarestorage.com");
+        assert_eq!(preset.region(), "auto");
+        assert_eq!(preset.addressing_style(), AddressingStyle::Path);
+    }
+
+    #[test]
+    fn cloudflare_r2_endpoint_fedramp_uses_jurisdiction_host() {
+        let preset = cloudflare_r2("123", R2Endpoint::FEDRAMP).unwrap();
+        assert_eq!(
+            preset.endpoint(),
+            "https://123.fedramp.r2.cloudflarestorage.com"
+        );
         assert_eq!(preset.region(), "auto");
         assert_eq!(preset.addressing_style(), AddressingStyle::Path);
     }

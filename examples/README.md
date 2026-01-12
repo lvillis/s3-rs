@@ -29,4 +29,4 @@ Most async examples support:
 - `blocking_presign_get.rs`: blocking presign with static credentials
 - `minio_local_put_get_delete.rs`: `providers::minio_local()` preset (`--features providers`)
 - `r2_put_get_delete.rs`: Cloudflare R2 preset (`--features providers`)
-
+  - Optional: `R2_JURISDICTION` (e.g. `eu`, `fedramp`) for jurisdiction-restricted buckets

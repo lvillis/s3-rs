@@ -469,6 +469,7 @@ mod tests {
             loop {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        let _ = stream.set_nonblocking(false);
                         let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
                         let mut request = Vec::new();
                         let mut buf = [0u8; 1024];
@@ -481,13 +482,21 @@ mod tests {
                                         break;
                                     }
                                 }
-                                Err(err) if err.kind() == ErrorKind::WouldBlock => break,
+                                Err(err)
+                                    if matches!(
+                                        err.kind(),
+                                        ErrorKind::WouldBlock | ErrorKind::TimedOut
+                                    ) =>
+                                {
+                                    break;
+                                }
                                 Err(_) => break,
                             }
                         }
                         let _ = stream.write_all(
                             b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                         );
+                        let _ = stream.flush();
                         break;
                     }
                     Err(err) if err.kind() == ErrorKind::WouldBlock => {
