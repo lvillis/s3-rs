@@ -1,77 +1,33 @@
-# Build
-/target
-*.exe
-*.dll
-*.so
-*.dylib
-*.a
-*.o
-*.d
-*.rlib
-*.rmeta
+# Rust
+/target/
+**/*.rs.bk
+/Cargo.lock
 
-# Docs
-/target/doc
+# Internal/private directories (must never be published)
+/.cargo/
+/.docs/
 
-# Project docs
-docs/
-
-# Cache
-.cargo/
-!.cargo/
-.cargo/*
-!.cargo/config.toml
-!.cargo/*.cmd
-
-# Coverage
-coverage/
-*.profraw
-*.profdata
-*.gcno
-*.gcda
-
-# IDE
-.vscode/
-.idea/
-*.iml
-*.code-workspace
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Temp
+# Logs and temporary files
+/logs/
 *.log
 *.tmp
-*.swp
-*.swo
+*.temp
 
-# Local databases
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
-
-# WASM
-pkg/
-*.wasm
-
-# Node
-node_modules/
-
-# Library crates may ignore Cargo.lock
-Cargo.lock
-
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+AGENTS.md
 .aiignore
 CONTEXT.md
-.justfile
 
-dist/
+# Editors and IDEs
+/.idea/
+/.vscode/
+*.swp
+*.swo
+*~
 
-.bak/
-
-crates/aptower/logs/
-
-# proptest
-proptest-regressions/
-AGENTS.md
+# OS-generated files
+.DS_Store
+Thumbs.db

@@ -46,13 +46,12 @@ fn parse_expiration(value: &str) -> Result<OffsetDateTime, Error> {
 }
 
 #[cfg(feature = "async")]
-pub(crate) async fn load_async() -> Result<CredentialsSnapshot, Error> {
+pub(crate) async fn load_async(
+    tls_root_store: reqx::TlsRootStore,
+) -> Result<CredentialsSnapshot, Error> {
     use std::time::Duration;
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .map_err(|e| Error::transport("failed to build HTTP client", Some(Box::new(e))))?;
+    let client = metadata_async_client(Duration::from_secs(2), tls_root_store)?;
 
     if let Some(full) = std::env::var("AWS_CONTAINER_CREDENTIALS_FULL_URI")
         .ok()
@@ -113,21 +112,23 @@ pub(crate) async fn load_async() -> Result<CredentialsSnapshot, Error> {
 
 #[cfg(feature = "async")]
 async fn http_get_text(
-    client: &reqwest::Client,
+    client: &reqx::Client,
     url: &str,
     headers: http::HeaderMap,
 ) -> Result<String, Error> {
-    let resp = client
-        .get(url)
-        .headers(headers)
+    let mut req = client.request(http::Method::GET, url.to_string());
+    for (name, value) in headers {
+        if let Some(name) = name {
+            req = req.header(name, value);
+        }
+    }
+
+    let resp = req
         .send()
         .await
         .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?;
     let status = resp.status();
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| Error::transport("failed to read response body", Some(Box::new(e))))?;
+    let body = String::from_utf8_lossy(resp.body()).to_string();
     if status.is_success() {
         return Ok(body);
     }
@@ -142,18 +143,21 @@ async fn http_get_text(
 }
 
 #[cfg(feature = "async")]
-async fn fetch_imds_v2_token(client: &reqwest::Client) -> Result<String, Error> {
+async fn fetch_imds_v2_token(client: &reqx::Client) -> Result<String, Error> {
     let resp = client
-        .put("http://169.254.169.254/latest/api/token")
-        .header("X-aws-ec2-metadata-token-ttl-seconds", "21600")
+        .request(
+            http::Method::PUT,
+            "http://169.254.169.254/latest/api/token".to_string(),
+        )
+        .header(
+            http::header::HeaderName::from_static("x-aws-ec2-metadata-token-ttl-seconds"),
+            http::HeaderValue::from_static("21600"),
+        )
         .send()
         .await
         .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?;
     let status = resp.status();
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| Error::transport("failed to read response body", Some(Box::new(e))))?;
+    let body = String::from_utf8_lossy(resp.body()).to_string();
     if status.is_success() {
         return Ok(body.trim().to_string());
     }
@@ -189,13 +193,19 @@ fn container_auth_headers() -> Result<http::HeaderMap, Error> {
 }
 
 #[cfg(feature = "blocking")]
-pub(crate) fn load_blocking() -> Result<CredentialsSnapshot, Error> {
+pub(crate) fn load_blocking(
+    tls_root_store: reqx::TlsRootStore,
+) -> Result<CredentialsSnapshot, Error> {
+    use std::time::Duration;
+
+    let client = metadata_blocking_client(Duration::from_secs(2), tls_root_store)?;
+
     if let Some(full) = std::env::var("AWS_CONTAINER_CREDENTIALS_FULL_URI")
         .ok()
         .filter(|v| !v.is_empty())
     {
         let headers = container_auth_headers_blocking()?;
-        let body = http_get_text_blocking(&full, &headers)?;
+        let body = http_get_text_blocking(&client, &full, &headers)?;
         let parsed: MetadataCredentials = serde_json::from_str(&body).map_err(|e| {
             Error::decode(
                 "failed to parse container credentials JSON",
@@ -211,7 +221,7 @@ pub(crate) fn load_blocking() -> Result<CredentialsSnapshot, Error> {
     {
         let url = format!("http://169.254.170.2{rel}");
         let headers = container_auth_headers_blocking()?;
-        let body = http_get_text_blocking(&url, &headers)?;
+        let body = http_get_text_blocking(&client, &url, &headers)?;
         let parsed: MetadataCredentials = serde_json::from_str(&body).map_err(|e| {
             Error::decode(
                 "failed to parse container credentials JSON",
@@ -221,7 +231,7 @@ pub(crate) fn load_blocking() -> Result<CredentialsSnapshot, Error> {
         return parsed.into_snapshot();
     }
 
-    let token = fetch_imds_v2_token_blocking().ok();
+    let token = fetch_imds_v2_token_blocking(&client).ok();
     let mut headers = http::HeaderMap::new();
     if let Some(token) = token.as_deref().filter(|v| !v.is_empty()) {
         let value = http::HeaderValue::from_str(token)
@@ -230,6 +240,7 @@ pub(crate) fn load_blocking() -> Result<CredentialsSnapshot, Error> {
     }
 
     let role = http_get_text_blocking(
+        &client,
         "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
         &headers,
     )?;
@@ -239,34 +250,28 @@ pub(crate) fn load_blocking() -> Result<CredentialsSnapshot, Error> {
     }
 
     let url = format!("http://169.254.169.254/latest/meta-data/iam/security-credentials/{role}");
-    let body = http_get_text_blocking(&url, &headers)?;
+    let body = http_get_text_blocking(&client, &url, &headers)?;
     let parsed: MetadataCredentials = serde_json::from_str(&body)
         .map_err(|e| Error::decode("failed to parse IMDS credentials JSON", Some(Box::new(e))))?;
     parsed.into_snapshot()
 }
 
 #[cfg(feature = "blocking")]
-fn http_get_text_blocking(url: &str, headers: &http::HeaderMap) -> Result<String, Error> {
-    use std::io::Read as _;
-
-    let mut req = ureq::agent().get(url);
-    for (name, value) in headers.iter() {
-        let Ok(value) = value.to_str() else {
-            continue;
-        };
-        req = req.header(name.as_str(), value);
+fn http_get_text_blocking(
+    client: &reqx::blocking::Client,
+    url: &str,
+    headers: &http::HeaderMap,
+) -> Result<String, Error> {
+    let mut req = client.request(http::Method::GET, url.to_string());
+    for (name, value) in headers {
+        req = req.header(name.clone(), value.clone());
     }
 
     let resp = req
-        .call()
+        .send()
         .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?;
     let status = resp.status();
-
-    let mut out = String::new();
-    resp.into_body()
-        .into_reader()
-        .read_to_string(&mut out)
-        .map_err(|e| Error::transport("failed to read response body", Some(Box::new(e))))?;
+    let out = String::from_utf8_lossy(resp.body()).to_string();
 
     if status.is_success() {
         return Ok(out);
@@ -283,22 +288,21 @@ fn http_get_text_blocking(url: &str, headers: &http::HeaderMap) -> Result<String
 }
 
 #[cfg(feature = "blocking")]
-fn fetch_imds_v2_token_blocking() -> Result<String, Error> {
-    use std::io::Read as _;
-
-    let resp = ureq::agent()
-        .put("http://169.254.169.254/latest/api/token")
-        .header("X-aws-ec2-metadata-token-ttl-seconds", "21600")
-        .send_empty()
+fn fetch_imds_v2_token_blocking(client: &reqx::blocking::Client) -> Result<String, Error> {
+    let resp = client
+        .request(
+            http::Method::PUT,
+            "http://169.254.169.254/latest/api/token".to_string(),
+        )
+        .header(
+            http::header::HeaderName::from_static("x-aws-ec2-metadata-token-ttl-seconds"),
+            http::HeaderValue::from_static("21600"),
+        )
+        .send()
         .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?;
 
     let status = resp.status();
-
-    let mut out = String::new();
-    resp.into_body()
-        .into_reader()
-        .read_to_string(&mut out)
-        .map_err(|e| Error::transport("failed to read response body", Some(Box::new(e))))?;
+    let out = String::from_utf8_lossy(resp.body()).to_string();
 
     if status.is_success() {
         return Ok(out.trim().to_string());
@@ -333,6 +337,51 @@ fn container_auth_headers_blocking() -> Result<http::HeaderMap, Error> {
         }
     }
     Ok(headers)
+}
+
+#[cfg(feature = "async")]
+fn metadata_async_client(
+    timeout: std::time::Duration,
+    tls_root_store: reqx::TlsRootStore,
+) -> Result<reqx::Client, Error> {
+    reqx::Client::builder("http://localhost")
+        .request_timeout(timeout)
+        .retry_policy(reqx::RetryPolicy::disabled())
+        .max_response_body_bytes(1024 * 1024)
+        .tls_backend(default_tls_backend())
+        .tls_root_store(tls_root_store)
+        .client_name("s3-imds")
+        .build()
+        .map_err(|e| Error::transport("failed to build HTTP client", Some(Box::new(e))))
+}
+
+#[cfg(feature = "blocking")]
+fn metadata_blocking_client(
+    timeout: std::time::Duration,
+    tls_root_store: reqx::TlsRootStore,
+) -> Result<reqx::blocking::Client, Error> {
+    reqx::blocking::Client::builder("http://localhost")
+        .request_timeout(timeout)
+        .retry_policy(reqx::RetryPolicy::disabled())
+        .max_response_body_bytes(1024 * 1024)
+        .tls_backend(default_tls_backend())
+        .tls_root_store(tls_root_store)
+        .client_name("s3-imds")
+        .build()
+        .map_err(|e| Error::transport("failed to build HTTP client", Some(Box::new(e))))
+}
+
+fn default_tls_backend() -> reqx::TlsBackend {
+    #[cfg(feature = "rustls")]
+    {
+        return reqx::TlsBackend::RustlsRing;
+    }
+    #[cfg(all(not(feature = "rustls"), feature = "native-tls"))]
+    {
+        return reqx::TlsBackend::NativeTls;
+    }
+    #[allow(unreachable_code)]
+    reqx::TlsBackend::RustlsRing
 }
 
 #[cfg(test)]

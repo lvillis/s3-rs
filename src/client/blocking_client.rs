@@ -8,9 +8,26 @@ use crate::{
     api,
     auth::{AddressingStyle, Auth, Region},
     error::{Error, Result},
-    transport::blocking_transport::{BlockingBody, BlockingTransport},
+    transport::blocking_transport::{BlockingBody, BlockingResponse, BlockingTransport},
     util,
 };
+
+/// Trust root selection for blocking HTTPS requests.
+///
+/// This only affects the blocking transport when using HTTPS.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BlockingTlsRootStore {
+    /// Use the backend default trust roots.
+    ///
+    /// For `rustls`, this is WebPKI roots when enabled by feature flags.
+    /// For `native-tls`, this follows the backend default behavior.
+    #[default]
+    BackendDefault,
+    /// Force WebPKI roots.
+    WebPki,
+    /// Use platform/system trust verification.
+    System,
+}
 
 /// Blocking S3 client.
 #[derive(Clone)]
@@ -27,6 +44,7 @@ pub struct BlockingClientBuilder {
     retry: crate::transport::RetryConfig,
     timeout: Option<Duration>,
     user_agent: Option<String>,
+    tls_root_store: BlockingTlsRootStore,
 }
 
 struct Inner {
@@ -61,7 +79,7 @@ impl BlockingClient {
         query_params: Vec<(String, String)>,
         mut headers: HeaderMap,
         body: BlockingBody,
-    ) -> Result<ureq::http::Response<ureq::Body>> {
+    ) -> Result<BlockingResponse> {
         #[cfg(feature = "tracing")]
         let _guard = tracing::info_span!(
             "s3.request",
@@ -101,6 +119,46 @@ impl BlockingClient {
         self.inner
             .transport
             .send(method, resolved.url, headers, body)
+    }
+
+    pub(crate) fn execute_stream(
+        &self,
+        method: Method,
+        bucket: Option<&str>,
+        key: Option<&str>,
+        query_params: Vec<(String, String)>,
+        mut headers: HeaderMap,
+        body: BlockingBody,
+    ) -> Result<reqx::blocking::ResponseStream> {
+        let resolved = util::url::resolve_url(
+            &self.inner.endpoint,
+            bucket,
+            key,
+            &query_params,
+            self.inner.addressing,
+        )?;
+
+        if let Some(snapshot) = self.inner.auth.credentials_snapshot_blocking()? {
+            let now = OffsetDateTime::now_utc();
+            let payload_hash = match &body {
+                BlockingBody::Empty => util::signing::payload_hash_empty(),
+                BlockingBody::Bytes(b) => util::signing::payload_hash_bytes(b),
+            };
+
+            util::signing::sign_headers(
+                &method,
+                &resolved,
+                &mut headers,
+                &payload_hash,
+                &self.inner.region,
+                snapshot.credentials(),
+                now,
+            )?;
+        }
+
+        self.inner
+            .transport
+            .send_stream(method, resolved.url, headers, body)
     }
 
     pub(crate) fn presign(
@@ -181,6 +239,7 @@ impl BlockingClientBuilder {
             retry: crate::transport::RetryConfig::default(),
             timeout: None,
             user_agent: None,
+            tls_root_store: BlockingTlsRootStore::BackendDefault,
         })
     }
 
@@ -232,13 +291,27 @@ impl BlockingClientBuilder {
         self
     }
 
+    /// Sets the trust root policy for blocking HTTPS requests.
+    ///
+    /// Builder default is `BackendDefault`.
+    /// Use `System` for enterprise/private PKI environments that rely on OS trust stores.
+    pub fn tls_root_store(mut self, tls_root_store: BlockingTlsRootStore) -> Self {
+        self.tls_root_store = tls_root_store;
+        self
+    }
+
     /// Builds the client after validating configuration.
     pub fn build(self) -> Result<BlockingClient> {
         let region = self
             .region
             .ok_or_else(|| Error::invalid_config("region is required"))
             .and_then(Region::new)?;
-        let transport = BlockingTransport::new(self.retry, self.user_agent, self.timeout)?;
+        let transport = BlockingTransport::new(
+            self.retry,
+            self.user_agent,
+            self.timeout,
+            self.tls_root_store.into_reqx(),
+        )?;
 
         Ok(BlockingClient {
             inner: Arc::new(Inner {
@@ -249,5 +322,15 @@ impl BlockingClientBuilder {
                 transport,
             }),
         })
+    }
+}
+
+impl BlockingTlsRootStore {
+    pub(crate) const fn into_reqx(self) -> reqx::TlsRootStore {
+        match self {
+            Self::BackendDefault => reqx::TlsRootStore::BackendDefault,
+            Self::WebPki => reqx::TlsRootStore::WebPki,
+            Self::System => reqx::TlsRootStore::System,
+        }
     }
 }

@@ -1,0 +1,64 @@
+#[cfg(feature = "blocking")]
+use std::env;
+
+#[cfg(feature = "blocking")]
+use s3::{Auth, BlockingClient, BlockingTlsRootStore};
+
+#[cfg(feature = "blocking")]
+fn tls_root_store_from_env() -> BlockingTlsRootStore {
+    match env::var("S3_TLS_ROOT_STORE")
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "webpki" => BlockingTlsRootStore::WebPki,
+        "system" => BlockingTlsRootStore::System,
+        _ => BlockingTlsRootStore::BackendDefault,
+    }
+}
+
+#[cfg(feature = "blocking")]
+#[allow(clippy::result_large_err)]
+fn main() -> Result<(), s3::Error> {
+    let endpoint = match env::var("S3_TEST_ENDPOINT") {
+        Ok(v) => v,
+        Err(_) => {
+            eprintln!("Set S3_TEST_ENDPOINT to run this example (e.g. http://127.0.0.1:9000).");
+            return Ok(());
+        }
+    };
+
+    let region = env::var("S3_TEST_REGION").unwrap_or_else(|_| "us-east-1".to_string());
+    let auth = match Auth::from_env() {
+        Ok(v) => v,
+        Err(err) => {
+            eprintln!("Set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY: {err}");
+            return Ok(());
+        }
+    };
+
+    let tls_root_store = tls_root_store_from_env();
+    eprintln!("Using request TLS root store: {tls_root_store:?}");
+    eprintln!("Set S3_TLS_ROOT_STORE=system|webpki|backend-default (default backend-default).");
+
+    let client = BlockingClient::builder(&endpoint)?
+        .region(region)
+        .auth(auth)
+        .tls_root_store(tls_root_store)
+        .build()?;
+
+    let buckets = client.buckets().list().send()?;
+    for bucket in buckets.buckets {
+        println!("{}", bucket.name);
+    }
+
+    Ok(())
+}
+
+#[cfg(not(feature = "blocking"))]
+fn main() {
+    eprintln!("This example requires the `blocking` feature.");
+    eprintln!(
+        "Try: cargo run --example blocking_tls_root_store --no-default-features --features blocking,rustls"
+    );
+}

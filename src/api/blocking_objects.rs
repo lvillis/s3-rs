@@ -414,7 +414,7 @@ impl BlockingGetObjectRequest {
             headers.insert(http::header::IF_UNMODIFIED_SINCE, value);
         }
 
-        let resp = self.client.execute(
+        let resp = self.client.execute_stream(
             Method::GET,
             Some(&self.bucket),
             Some(&self.key),
@@ -424,9 +424,14 @@ impl BlockingGetObjectRequest {
         )?;
 
         if !resp.status().is_success() {
-            let (parts, body) = resp.into_parts();
-            let body = read_body_string(body)?;
-            return Err(response_error(parts.status, &parts.headers, &body));
+            let resp = resp
+                .into_response_limited(usize::MAX)
+                .map_err(|e| Error::transport("failed to read response body", Some(Box::new(e))))?;
+            return Err(response_error(
+                resp.status(),
+                resp.headers(),
+                &resp.text_lossy(),
+            ));
         }
 
         let etag = crate::util::headers::header_string(resp.headers(), http::header::ETAG);

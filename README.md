@@ -75,13 +75,14 @@ fn demo() -> Result<(), s3::Error> {
 ```rust,no_run
 use std::time::Duration;
 
-use s3::{AddressingStyle, Auth, Client};
+use s3::{AddressingStyle, AsyncTlsRootStore, Auth, Client};
 
 # async fn demo() -> Result<(), s3::Error> {
 let client = Client::builder("https://s3.example.com")?
     .region("us-east-1")
     .auth(Auth::from_env()?)
     .addressing_style(AddressingStyle::Auto)
+    .tls_root_store(AsyncTlsRootStore::BackendDefault)
     .timeout(Duration::from_secs(30))
     .max_attempts(3)
     .build()?;
@@ -130,6 +131,7 @@ let client = preset
 - `Auth::Anonymous`: unsigned requests (for public buckets / anonymous endpoints)
 - `Auth::from_env()`: static credentials from env vars
 - `Auth::provider(...)`: plug in your own refreshable provider (cached/singleflight refresh)
+- `Auth::from_imds_with_tls_root_store(...)` / `Auth::from_web_identity_env_with_tls_root_store(...)`: explicit TLS root policy for credentials fetch
 - Optional features:
   - `credentials-profile`: shared config/profile loader
   - `credentials-imds`: IMDS credentials (async/blocking APIs)
@@ -153,5 +155,6 @@ let client = preset
 - List objects v2 + pagination: `examples/async_list_objects.rs`
 - Multipart upload (feature = `multipart`): `examples/async_multipart_upload.rs`
 - Presign: `examples/presign_get.rs`, `examples/async_presign_build_async.rs`
+- TLS root policy: `examples/async_tls_root_store.rs`, `examples/blocking_tls_root_store.rs`
 - Blocking: `examples/blocking_put_get_delete.rs`
 - More: `examples/README.md`

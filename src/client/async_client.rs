@@ -8,9 +8,26 @@ use crate::{
     api,
     auth::{AddressingStyle, Auth, Region},
     error::{Error, Result},
-    transport::async_transport::{AsyncBody, AsyncTransport},
+    transport::async_transport::{AsyncBody, AsyncResponse, AsyncTransport},
     util,
 };
+
+/// Trust root selection for async HTTPS requests.
+///
+/// This only affects the async transport when using HTTPS.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AsyncTlsRootStore {
+    /// Use the backend default trust roots.
+    ///
+    /// For `rustls`, this maps to WebPKI roots.
+    /// For `native-tls`, this follows the backend default behavior.
+    #[default]
+    BackendDefault,
+    /// Force WebPKI roots.
+    WebPki,
+    /// Use platform/system trust verification.
+    System,
+}
 
 /// Async S3 client.
 #[derive(Clone)]
@@ -27,6 +44,7 @@ pub struct ClientBuilder {
     retry: crate::transport::RetryConfig,
     timeout: Option<Duration>,
     user_agent: Option<String>,
+    tls_root_store: AsyncTlsRootStore,
 }
 
 struct Inner {
@@ -61,7 +79,7 @@ impl Client {
         query_params: Vec<(String, String)>,
         mut headers: HeaderMap,
         body: AsyncBody,
-    ) -> Result<reqwest::Response> {
+    ) -> Result<AsyncResponse> {
         #[cfg(feature = "tracing")]
         let _guard = tracing::info_span!(
             "s3.request",
@@ -102,6 +120,48 @@ impl Client {
         self.inner
             .transport
             .send(method, resolved.url, headers, body)
+            .await
+    }
+
+    pub(crate) async fn execute_stream(
+        &self,
+        method: Method,
+        bucket: Option<&str>,
+        key: Option<&str>,
+        query_params: Vec<(String, String)>,
+        mut headers: HeaderMap,
+        body: AsyncBody,
+    ) -> Result<reqx::ResponseStream> {
+        let resolved = util::url::resolve_url(
+            &self.inner.endpoint,
+            bucket,
+            key,
+            &query_params,
+            self.inner.addressing,
+        )?;
+
+        if let Some(snapshot) = self.inner.auth.credentials_snapshot_async().await? {
+            let now = OffsetDateTime::now_utc();
+            let payload_hash = match &body {
+                AsyncBody::Empty => util::signing::payload_hash_empty(),
+                AsyncBody::Bytes(b) => util::signing::payload_hash_bytes(b),
+                AsyncBody::Stream { .. } => util::signing::UNSIGNED_PAYLOAD.to_string(),
+            };
+
+            util::signing::sign_headers(
+                &method,
+                &resolved,
+                &mut headers,
+                &payload_hash,
+                &self.inner.region,
+                snapshot.credentials(),
+                now,
+            )?;
+        }
+
+        self.inner
+            .transport
+            .send_stream(method, resolved.url, headers, body)
             .await
     }
 
@@ -219,6 +279,7 @@ impl ClientBuilder {
             retry: crate::transport::RetryConfig::default(),
             timeout: None,
             user_agent: None,
+            tls_root_store: AsyncTlsRootStore::BackendDefault,
         })
     }
 
@@ -270,6 +331,15 @@ impl ClientBuilder {
         self
     }
 
+    /// Sets the trust root policy for async HTTPS requests.
+    ///
+    /// Builder default is `BackendDefault`.
+    /// Use `System` for enterprise/private PKI environments that rely on OS trust stores.
+    pub fn tls_root_store(mut self, tls_root_store: AsyncTlsRootStore) -> Self {
+        self.tls_root_store = tls_root_store;
+        self
+    }
+
     /// Builds the client after validating configuration.
     pub fn build(self) -> Result<Client> {
         let region = self
@@ -277,7 +347,12 @@ impl ClientBuilder {
             .ok_or_else(|| Error::invalid_config("region is required"))
             .and_then(Region::new)?;
 
-        let transport = AsyncTransport::new(self.retry, self.user_agent, self.timeout)?;
+        let transport = AsyncTransport::new(
+            self.retry,
+            self.user_agent,
+            self.timeout,
+            self.tls_root_store.into_reqx(),
+        )?;
 
         let inner = Inner {
             endpoint: self.endpoint,
@@ -290,5 +365,15 @@ impl ClientBuilder {
         Ok(Client {
             inner: Arc::new(inner),
         })
+    }
+}
+
+impl AsyncTlsRootStore {
+    pub(crate) const fn into_reqx(self) -> reqx::TlsRootStore {
+        match self {
+            Self::BackendDefault => reqx::TlsRootStore::BackendDefault,
+            Self::WebPki => reqx::TlsRootStore::WebPki,
+            Self::System => reqx::TlsRootStore::System,
+        }
     }
 }

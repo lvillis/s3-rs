@@ -4,6 +4,6 @@ mod async_client;
 mod blocking_client;
 
 #[cfg(feature = "async")]
-pub use async_client::{Client, ClientBuilder};
+pub use async_client::{AsyncTlsRootStore, Client, ClientBuilder};
 #[cfg(feature = "blocking")]
-pub use blocking_client::{BlockingClient, BlockingClientBuilder};
+pub use blocking_client::{BlockingClient, BlockingClientBuilder, BlockingTlsRootStore};

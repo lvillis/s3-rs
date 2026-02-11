@@ -4,8 +4,6 @@ use std::time::Duration;
 pub(crate) mod async_transport;
 #[cfg(feature = "blocking")]
 pub(crate) mod blocking_transport;
-#[cfg(feature = "rustls")]
-pub(crate) mod tls;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RetryConfig {
@@ -50,6 +48,82 @@ fn jitter_millis(max_millis: u128) -> u128 {
     nanos % max_millis
 }
 
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn request_id_from_headers(headers: &http::HeaderMap) -> Option<String> {
+    headers
+        .get("x-amz-request-id")
+        .or_else(|| headers.get("x-request-id"))
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.to_string())
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn retry_after_from_headers(headers: &http::HeaderMap) -> Option<Duration> {
+    headers
+        .get(http::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_secs)
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+pub(crate) fn response_error_from_status(
+    status: http::StatusCode,
+    headers: &http::HeaderMap,
+    body: &str,
+) -> crate::error::Error {
+    let request_id = request_id_from_headers(headers);
+
+    if status == http::StatusCode::TOO_MANY_REQUESTS {
+        return crate::error::Error::RateLimited {
+            retry_after: retry_after_from_headers(headers),
+            request_id,
+        };
+    }
+
+    let snippet = crate::util::text::truncate_snippet(body, 4096);
+    if let Some(parsed) = crate::util::xml::parse_error_xml(body) {
+        return crate::error::Error::Api {
+            status,
+            code: parsed.code,
+            message: parsed.message,
+            request_id: parsed.request_id.or(request_id),
+            host_id: parsed.host_id,
+            body_snippet: Some(snippet),
+        };
+    }
+
+    crate::error::Error::Api {
+        status,
+        code: None,
+        message: None,
+        request_id,
+        host_id: None,
+        body_snippet: Some(snippet),
+    }
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+pub(crate) fn map_reqx_error(message: &str, err: reqx::Error) -> crate::error::Error {
+    match err {
+        reqx::Error::HttpStatus {
+            status,
+            headers,
+            body,
+            ..
+        } => {
+            let status = http::StatusCode::from_u16(status)
+                .unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR);
+            response_error_from_status(status, &headers, &body)
+        }
+        reqx::Error::DeserializeJson { source, .. } => crate::error::Error::decode(
+            format!("{message}: failed to decode response json"),
+            Some(Box::new(source)),
+        ),
+        other => crate::error::Error::transport(message, Some(Box::new(other))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,5 +157,62 @@ mod tests {
 
         assert_eq!(backoff_delay(cfg, 1), Duration::from_millis(0));
         assert_eq!(backoff_delay(cfg, 10), Duration::from_millis(0));
+    }
+
+    #[cfg(any(feature = "async", feature = "blocking"))]
+    #[test]
+    fn map_reqx_error_http_status_is_mapped_to_api_error() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            "x-amz-request-id",
+            http::HeaderValue::from_static("req-123"),
+        );
+        let body = "<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>";
+
+        let err = reqx::Error::HttpStatus {
+            status: 403,
+            method: http::Method::GET,
+            uri: "https://example.com/path".to_string(),
+            headers: Box::new(headers),
+            body: body.to_string(),
+        };
+
+        match map_reqx_error("request failed", err) {
+            crate::error::Error::Api {
+                status,
+                code,
+                message,
+                request_id,
+                ..
+            } => {
+                assert_eq!(status, http::StatusCode::FORBIDDEN);
+                assert_eq!(code.as_deref(), Some("AccessDenied"));
+                assert_eq!(message.as_deref(), Some("Access Denied"));
+                assert_eq!(request_id.as_deref(), Some("req-123"));
+            }
+            other => panic!("expected Api error, got {other:?}"),
+        }
+    }
+
+    #[cfg(all(
+        any(feature = "async", feature = "blocking"),
+        feature = "credentials-imds"
+    ))]
+    #[test]
+    fn map_reqx_error_deserialize_json_is_sanitized() {
+        let source = serde_json::from_slice::<serde_json::Value>(b"{not-json")
+            .expect_err("invalid json should produce an error");
+        let err = reqx::Error::DeserializeJson {
+            source,
+            body: "token=super-secret-value".to_string(),
+        };
+
+        let mapped = map_reqx_error("request failed", err);
+        match mapped {
+            crate::error::Error::Decode { source, .. } => {
+                assert!(source.is_some());
+            }
+            other => panic!("expected Decode error, got {other:?}"),
+        }
     }
 }

@@ -1,15 +1,17 @@
+use std::io::Cursor;
 use std::time::Duration;
 
 #[cfg(feature = "metrics")]
 use std::time::Instant;
 
 use bytes::Bytes;
-use http::{HeaderMap, Method, StatusCode};
+use http::header::USER_AGENT;
+use http::{HeaderMap, HeaderValue, Method, StatusCode};
 use url::Url;
 
 use crate::{
     error::{Error, Result},
-    transport::{RetryConfig, backoff_delay},
+    transport::{RetryConfig, backoff_delay, map_reqx_error, response_error_from_status},
 };
 
 pub(crate) enum BlockingBody {
@@ -30,11 +32,51 @@ impl BlockingBody {
     }
 }
 
+pub(crate) struct BlockingResponseBody {
+    body: Bytes,
+}
+
+impl BlockingResponseBody {
+    pub(crate) fn into_reader(self) -> Cursor<Bytes> {
+        Cursor::new(self.body)
+    }
+}
+
+pub(crate) struct BlockingResponse {
+    status: StatusCode,
+    headers: HeaderMap,
+    body: Bytes,
+}
+
+impl BlockingResponse {
+    fn from_reqx(resp: reqx::Response) -> Self {
+        Self {
+            status: resp.status(),
+            headers: resp.headers().clone(),
+            body: resp.body().clone(),
+        }
+    }
+
+    pub(crate) fn status(&self) -> StatusCode {
+        self.status
+    }
+
+    pub(crate) fn headers(&self) -> &HeaderMap {
+        &self.headers
+    }
+
+    pub(crate) fn into_parts(self) -> (http::response::Parts, BlockingResponseBody) {
+        let mut response = http::Response::new(BlockingResponseBody { body: self.body });
+        *response.status_mut() = self.status;
+        *response.headers_mut() = self.headers;
+        response.into_parts()
+    }
+}
+
 pub(crate) struct BlockingTransport {
-    agent: ureq::Agent,
+    client: reqx::blocking::Client,
     retry: RetryConfig,
-    timeout: Option<Duration>,
-    user_agent: String,
+    user_agent: HeaderValue,
 }
 
 impl BlockingTransport {
@@ -42,19 +84,31 @@ impl BlockingTransport {
         retry: RetryConfig,
         user_agent: Option<String>,
         timeout: Option<Duration>,
+        tls_root_store: reqx::TlsRootStore,
     ) -> Result<Self> {
-        #[cfg(feature = "rustls")]
-        crate::transport::tls::ensure_rustls_crypto_provider();
+        let user_agent_text = user_agent.unwrap_or_else(default_user_agent);
+        let user_agent = HeaderValue::from_str(&user_agent_text)
+            .map_err(|_| Error::invalid_config("invalid User-Agent header"))?;
 
-        let config = ureq::Agent::config_builder()
-            .http_status_as_error(false)
-            .build();
+        let mut builder = reqx::blocking::Client::builder("http://localhost")
+            .client_name(user_agent_text)
+            .retry_policy(reqx::RetryPolicy::disabled())
+            .max_response_body_bytes(usize::MAX)
+            .tls_backend(default_tls_backend())
+            .tls_root_store(tls_root_store);
+
+        if let Some(timeout) = timeout {
+            builder = builder.request_timeout(timeout);
+        }
+
+        let client = builder
+            .build()
+            .map_err(|e| map_reqx_error("failed to build HTTP client", e))?;
 
         Ok(Self {
-            agent: ureq::Agent::new_with_config(config),
+            client,
             retry,
-            timeout,
-            user_agent: user_agent.unwrap_or_else(default_user_agent),
+            user_agent,
         })
     }
 
@@ -64,7 +118,7 @@ impl BlockingTransport {
         url: Url,
         headers: HeaderMap,
         body: BlockingBody,
-    ) -> Result<ureq::http::Response<ureq::Body>> {
+    ) -> Result<BlockingResponse> {
         let max_attempts = if body.is_replayable() {
             self.retry.max_attempts
         } else {
@@ -90,66 +144,9 @@ impl BlockingTransport {
             let current_body = body
                 .clone_for_retry()
                 .ok_or_else(|| Error::transport("request body is not replayable", None))?;
+            let req = self.build_request(&method, url.clone(), headers.clone(), current_body)?;
 
-            let result = match method.as_str() {
-                "GET" => {
-                    ensure_empty_body(&current_body)?;
-                    let req = apply_headers(
-                        self.agent.get(url.as_str()),
-                        &headers,
-                        &self.user_agent,
-                        self.timeout,
-                    );
-                    req.call()
-                }
-                "HEAD" => {
-                    ensure_empty_body(&current_body)?;
-                    let req = apply_headers(
-                        self.agent.head(url.as_str()),
-                        &headers,
-                        &self.user_agent,
-                        self.timeout,
-                    );
-                    req.call()
-                }
-                "DELETE" => {
-                    ensure_empty_body(&current_body)?;
-                    let req = apply_headers(
-                        self.agent.delete(url.as_str()),
-                        &headers,
-                        &self.user_agent,
-                        self.timeout,
-                    );
-                    req.call()
-                }
-                "PUT" => {
-                    let req = apply_headers(
-                        self.agent.put(url.as_str()),
-                        &headers,
-                        &self.user_agent,
-                        self.timeout,
-                    );
-                    match current_body {
-                        BlockingBody::Empty => req.send_empty(),
-                        BlockingBody::Bytes(b) => req.send(b.as_ref()),
-                    }
-                }
-                "POST" => {
-                    let req = apply_headers(
-                        self.agent.post(url.as_str()),
-                        &headers,
-                        &self.user_agent,
-                        self.timeout,
-                    );
-                    match current_body {
-                        BlockingBody::Empty => req.send_empty(),
-                        BlockingBody::Bytes(b) => req.send(b.as_ref()),
-                    }
-                }
-                _ => return Err(Error::invalid_config("unsupported HTTP method")),
-            };
-
-            let resp = match result {
+            let resp = match req.send() {
                 Ok(resp) => resp,
                 Err(err) => {
                     if attempt < max_attempts && should_retry_error(&err) {
@@ -176,9 +173,9 @@ impl BlockingTransport {
                     )
                     .increment(1);
 
-                    return Err(Error::transport(
-                        format!("request failed: {}", request_context(&method, &url)),
-                        Some(Box::new(err)),
+                    return Err(map_reqx_error(
+                        &format!("request failed: {}", request_context(&method, &url)),
+                        err,
                     ));
                 }
             };
@@ -209,12 +206,13 @@ impl BlockingTransport {
                 #[cfg(feature = "tracing")]
                 tracing::debug!(status = %resp.status(), "retrying after response status");
 
-                let delay = retry_delay_from_response(self.retry, attempt, &resp);
+                let delay =
+                    retry_delay_from_response(self.retry, attempt, resp.status(), resp.headers());
                 std::thread::sleep(delay);
                 continue;
             }
 
-            return Ok(resp);
+            return Ok(BlockingResponse::from_reqx(resp));
         }
 
         #[cfg(feature = "metrics")]
@@ -232,58 +230,109 @@ impl BlockingTransport {
             None,
         ))
     }
+
+    pub(crate) fn send_stream(
+        &self,
+        method: Method,
+        url: Url,
+        headers: HeaderMap,
+        body: BlockingBody,
+    ) -> Result<reqx::blocking::ResponseStream> {
+        let max_attempts = if body.is_replayable() {
+            self.retry.max_attempts
+        } else {
+            1
+        };
+
+        for attempt in 1..=max_attempts {
+            let current_body = body
+                .clone_for_retry()
+                .ok_or_else(|| Error::transport("request body is not replayable", None))?;
+            let req = self.build_request(&method, url.clone(), headers.clone(), current_body)?;
+
+            match req.send_stream() {
+                Ok(resp) => {
+                    if should_retry_status(resp.status()) && attempt < max_attempts {
+                        let delay = retry_delay_from_response(
+                            self.retry,
+                            attempt,
+                            resp.status(),
+                            resp.headers(),
+                        );
+                        drop(resp);
+                        std::thread::sleep(delay);
+                        continue;
+                    }
+                    return Ok(resp);
+                }
+                Err(err) => {
+                    if attempt < max_attempts && should_retry_error(&err) {
+                        let delay = backoff_delay(self.retry, attempt);
+                        std::thread::sleep(delay);
+                        continue;
+                    }
+                    return Err(map_reqx_error(
+                        &format!("request failed: {}", request_context(&method, &url)),
+                        err,
+                    ));
+                }
+            }
+        }
+
+        Err(Error::transport(
+            format!(
+                "request failed after retries: {}",
+                request_context(&method, &url)
+            ),
+            None,
+        ))
+    }
+
+    fn build_request(
+        &self,
+        method: &Method,
+        url: Url,
+        headers: HeaderMap,
+        body: BlockingBody,
+    ) -> Result<reqx::blocking::RequestBuilder<'_>> {
+        if matches!(*method, Method::GET | Method::HEAD | Method::DELETE) {
+            ensure_empty_body(&body)?;
+        }
+
+        let mut req = self
+            .client
+            .request(method.clone(), url.as_str().to_string())
+            .retry_policy(reqx::RetryPolicy::disabled())
+            .status_policy(reqx::StatusPolicy::Response)
+            .header(USER_AGENT, self.user_agent.clone());
+
+        for (name, value) in headers {
+            if let Some(name) = name {
+                req = req.header(name, value);
+            }
+        }
+
+        req = match body {
+            BlockingBody::Empty => req,
+            BlockingBody::Bytes(b) => req.body_bytes(b),
+        };
+
+        Ok(req)
+    }
 }
 
 pub(crate) fn response_error(status: StatusCode, headers: &http::HeaderMap, body: &str) -> Error {
-    let request_id = headers
-        .get("x-amz-request-id")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.to_string());
-
-    if status == StatusCode::TOO_MANY_REQUESTS {
-        let retry_after = headers
-            .get(http::header::RETRY_AFTER)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse::<u64>().ok())
-            .map(Duration::from_secs);
-
-        return Error::RateLimited {
-            retry_after,
-            request_id,
-        };
-    }
-
-    let snippet = crate::util::text::truncate_snippet(body, 4096);
-
-    if let Some(parsed) = crate::util::xml::parse_error_xml(body) {
-        return Error::Api {
-            status,
-            code: parsed.code,
-            message: parsed.message,
-            request_id: parsed.request_id.or(request_id),
-            host_id: parsed.host_id,
-            body_snippet: Some(snippet),
-        };
-    }
-
-    Error::Api {
-        status,
-        code: None,
-        message: None,
-        request_id,
-        host_id: None,
-        body_snippet: Some(snippet),
-    }
+    response_error_from_status(status, headers, body)
 }
 
 fn retry_delay_from_response(
     config: RetryConfig,
     attempt: u32,
-    resp: &ureq::http::Response<ureq::Body>,
+    status: StatusCode,
+    headers: &HeaderMap,
 ) -> Duration {
-    if resp.status() == StatusCode::TOO_MANY_REQUESTS
-        && let Some(retry_after) = resp
-            .headers()
+    if status == StatusCode::TOO_MANY_REQUESTS
+        && let Some(retry_after) = headers
             .get(http::header::RETRY_AFTER)
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.parse::<u64>().ok())
@@ -297,14 +346,13 @@ fn should_retry_status(status: StatusCode) -> bool {
     status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
 }
 
-fn should_retry_error(err: &ureq::Error) -> bool {
+fn should_retry_error(err: &reqx::Error) -> bool {
     matches!(
         err,
-        ureq::Error::Timeout(_)
-            | ureq::Error::Protocol(_)
-            | ureq::Error::Io(_)
-            | ureq::Error::HostNotFound
-            | ureq::Error::ConnectionFailed
+        reqx::Error::Transport { .. }
+            | reqx::Error::Timeout { .. }
+            | reqx::Error::DeadlineExceeded { .. }
+            | reqx::Error::ReadBody { .. }
     )
 }
 
@@ -329,6 +377,19 @@ fn ensure_empty_body(body: &BlockingBody) -> Result<()> {
             "this operation does not accept a request body",
         )),
     }
+}
+
+fn default_tls_backend() -> reqx::TlsBackend {
+    #[cfg(feature = "rustls")]
+    {
+        return reqx::TlsBackend::RustlsRing;
+    }
+    #[cfg(all(not(feature = "rustls"), feature = "native-tls"))]
+    {
+        return reqx::TlsBackend::NativeTls;
+    }
+    #[allow(unreachable_code)]
+    reqx::TlsBackend::RustlsRing
 }
 
 #[cfg(feature = "metrics")]
@@ -358,27 +419,6 @@ fn method_label(method: &Method) -> &'static str {
         "POST" => "POST",
         _ => "OTHER",
     }
-}
-
-fn apply_headers<B>(
-    mut req: ureq::RequestBuilder<B>,
-    headers: &HeaderMap,
-    user_agent: &str,
-    timeout: Option<Duration>,
-) -> ureq::RequestBuilder<B> {
-    req = req.header(http::header::USER_AGENT, user_agent);
-    for (name, value) in headers.iter() {
-        let Ok(value_str) = value.to_str() else {
-            continue;
-        };
-        req = req.header(name.as_str(), value_str);
-    }
-
-    if let Some(timeout) = timeout {
-        req = req.config().timeout_global(Some(timeout)).build();
-    }
-
-    req
 }
 
 fn default_user_agent() -> String {
@@ -514,7 +554,12 @@ mod tests {
             max_attempts: 1,
             ..RetryConfig::default()
         };
-        let transport = BlockingTransport::new(retry, None, Some(Duration::from_secs(5)))?;
+        let transport = BlockingTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::System,
+        )?;
         let url = Url::parse(&format!("http://{addr}/"))
             .map_err(|_| Error::invalid_config("invalid test server URL"))?;
 

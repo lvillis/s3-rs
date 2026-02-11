@@ -15,6 +15,7 @@ pub(crate) async fn assume_role_async(
     role_arn: String,
     role_session_name: String,
     source_credentials: Credentials,
+    tls_root_store: reqx::TlsRootStore,
 ) -> Result<CredentialsSnapshot, Error> {
     use std::time::Duration;
 
@@ -47,24 +48,9 @@ pub(crate) async fn assume_role_async(
         crate::util::signing::SigV4Params::new(&region, SERVICE, &source_credentials, now),
     )?;
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| Error::transport("failed to build HTTP client", Some(Box::new(e))))?;
-
-    let resp = client
-        .post(resolved.url)
-        .headers(headers)
-        .body(body_bytes)
-        .send()
-        .await
-        .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?;
-
-    let status = resp.status();
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| Error::transport("failed to read response body", Some(Box::new(e))))?;
+    let client = sts_async_client(Duration::from_secs(10), tls_root_store)?;
+    let (status, text) =
+        send_form_async(&client, resolved.url.as_str(), headers, body_bytes).await?;
 
     if !status.is_success() {
         return Err(sts_api_error(status, &text));
@@ -79,8 +65,9 @@ pub(crate) fn assume_role_blocking(
     role_arn: String,
     role_session_name: String,
     source_credentials: Credentials,
+    tls_root_store: reqx::TlsRootStore,
 ) -> Result<CredentialsSnapshot, Error> {
-    use std::io::Read as _;
+    use std::time::Duration;
 
     let endpoint = sts_regional_endpoint(&region)?;
     let body = form_body(&[
@@ -111,25 +98,8 @@ pub(crate) fn assume_role_blocking(
         crate::util::signing::SigV4Params::new(&region, SERVICE, &source_credentials, now),
     )?;
 
-    let mut req = ureq::agent().post(resolved.url.as_str());
-    for (name, value) in headers.iter() {
-        let Ok(value) = value.to_str() else {
-            continue;
-        };
-        req = req.header(name.as_str(), value);
-    }
-
-    let resp = req
-        .send(body_bytes.as_ref())
-        .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?;
-
-    let status = resp.status();
-
-    let mut text = String::new();
-    resp.into_body()
-        .into_reader()
-        .read_to_string(&mut text)
-        .map_err(|e| Error::transport("failed to read response body", Some(Box::new(e))))?;
+    let client = sts_blocking_client(Duration::from_secs(10), tls_root_store)?;
+    let (status, text) = send_form_blocking(&client, resolved.url.as_str(), headers, body_bytes)?;
 
     if !status.is_success() {
         return Err(sts_api_error(status, &text));
@@ -139,8 +109,9 @@ pub(crate) fn assume_role_blocking(
 }
 
 #[cfg(feature = "async")]
-pub(crate) async fn assume_role_with_web_identity_env_async() -> Result<CredentialsSnapshot, Error>
-{
+pub(crate) async fn assume_role_with_web_identity_env_async(
+    tls_root_store: reqx::TlsRootStore,
+) -> Result<CredentialsSnapshot, Error> {
     use std::time::Duration;
 
     let (role_arn, session_name, token) = web_identity_env()?;
@@ -157,27 +128,14 @@ pub(crate) async fn assume_role_with_web_identity_env_async() -> Result<Credenti
     ]);
     let body_bytes = Bytes::from(body);
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| Error::transport("failed to build HTTP client", Some(Box::new(e))))?;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/x-www-form-urlencoded"),
+    );
 
-    let resp = client
-        .post(endpoint)
-        .header(
-            http::header::CONTENT_TYPE,
-            "application/x-www-form-urlencoded",
-        )
-        .body(body_bytes)
-        .send()
-        .await
-        .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?;
-
-    let status = resp.status();
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| Error::transport("failed to read response body", Some(Box::new(e))))?;
+    let client = sts_async_client(Duration::from_secs(10), tls_root_store)?;
+    let (status, text) = send_form_async(&client, endpoint.as_str(), headers, body_bytes).await?;
 
     if !status.is_success() {
         return Err(sts_api_error(status, &text));
@@ -187,8 +145,10 @@ pub(crate) async fn assume_role_with_web_identity_env_async() -> Result<Credenti
 }
 
 #[cfg(feature = "blocking")]
-pub(crate) fn assume_role_with_web_identity_env_blocking() -> Result<CredentialsSnapshot, Error> {
-    use std::io::Read as _;
+pub(crate) fn assume_role_with_web_identity_env_blocking(
+    tls_root_store: reqx::TlsRootStore,
+) -> Result<CredentialsSnapshot, Error> {
+    use std::time::Duration;
 
     let (role_arn, session_name, token) = web_identity_env()?;
 
@@ -200,25 +160,78 @@ pub(crate) fn assume_role_with_web_identity_env_blocking() -> Result<Credentials
         ("WebIdentityToken", &token),
     ]);
 
-    let resp = ureq::agent()
-        .post("https://sts.amazonaws.com/")
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .send(body.as_bytes())
-        .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/x-www-form-urlencoded"),
+    );
 
-    let status = resp.status();
-
-    let mut text = String::new();
-    resp.into_body()
-        .into_reader()
-        .read_to_string(&mut text)
-        .map_err(|e| Error::transport("failed to read response body", Some(Box::new(e))))?;
+    let client = sts_blocking_client(Duration::from_secs(10), tls_root_store)?;
+    let (status, text) = send_form_blocking(
+        &client,
+        "https://sts.amazonaws.com/",
+        headers,
+        Bytes::from(body),
+    )?;
 
     if !status.is_success() {
         return Err(sts_api_error(status, &text));
     }
 
     parse_assume_role_with_web_identity_response(&text)
+}
+
+#[cfg(feature = "async")]
+async fn send_form_async(
+    client: &reqx::Client,
+    url: &str,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<(StatusCode, String), Error> {
+    let mut req = client
+        .request(Method::POST, url.to_string())
+        .body_bytes(body)
+        .retry_policy(reqx::RetryPolicy::disabled());
+    for (name, value) in headers {
+        if let Some(name) = name {
+            req = req.header(name, value);
+        }
+    }
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?;
+    Ok((
+        resp.status(),
+        String::from_utf8_lossy(resp.body()).to_string(),
+    ))
+}
+
+#[cfg(feature = "blocking")]
+fn send_form_blocking(
+    client: &reqx::blocking::Client,
+    url: &str,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<(StatusCode, String), Error> {
+    let mut req = client
+        .request(Method::POST, url.to_string())
+        .body_bytes(body)
+        .retry_policy(reqx::RetryPolicy::disabled());
+    for (name, value) in headers {
+        if let Some(name) = name {
+            req = req.header(name, value);
+        }
+    }
+
+    let resp = req
+        .send()
+        .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?;
+    Ok((
+        resp.status(),
+        String::from_utf8_lossy(resp.body()).to_string(),
+    ))
 }
 
 fn sts_regional_endpoint(region: &Region) -> Result<url::Url, Error> {
@@ -365,6 +378,51 @@ fn parse_assume_role_with_web_identity_response(body: &str) -> Result<Credential
     creds = creds.with_session_token(parsed.result.credentials.session_token)?;
     let expires_at = parse_expiration(parsed.result.credentials.expiration.trim())?;
     Ok(CredentialsSnapshot::new(creds).with_expires_at(expires_at))
+}
+
+#[cfg(feature = "async")]
+fn sts_async_client(
+    timeout: std::time::Duration,
+    tls_root_store: reqx::TlsRootStore,
+) -> Result<reqx::Client, Error> {
+    reqx::Client::builder("http://localhost")
+        .request_timeout(timeout)
+        .retry_policy(reqx::RetryPolicy::disabled())
+        .max_response_body_bytes(4 * 1024 * 1024)
+        .tls_backend(default_tls_backend())
+        .tls_root_store(tls_root_store)
+        .client_name("s3-sts")
+        .build()
+        .map_err(|e| Error::transport("failed to build HTTP client", Some(Box::new(e))))
+}
+
+#[cfg(feature = "blocking")]
+fn sts_blocking_client(
+    timeout: std::time::Duration,
+    tls_root_store: reqx::TlsRootStore,
+) -> Result<reqx::blocking::Client, Error> {
+    reqx::blocking::Client::builder("http://localhost")
+        .request_timeout(timeout)
+        .retry_policy(reqx::RetryPolicy::disabled())
+        .max_response_body_bytes(4 * 1024 * 1024)
+        .tls_backend(default_tls_backend())
+        .tls_root_store(tls_root_store)
+        .client_name("s3-sts")
+        .build()
+        .map_err(|e| Error::transport("failed to build HTTP client", Some(Box::new(e))))
+}
+
+fn default_tls_backend() -> reqx::TlsBackend {
+    #[cfg(feature = "rustls")]
+    {
+        return reqx::TlsBackend::RustlsRing;
+    }
+    #[cfg(all(not(feature = "rustls"), feature = "native-tls"))]
+    {
+        return reqx::TlsBackend::NativeTls;
+    }
+    #[allow(unreachable_code)]
+    reqx::TlsBackend::RustlsRing
 }
 
 #[cfg(test)]

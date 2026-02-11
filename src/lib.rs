@@ -53,6 +53,12 @@
 ))]
 compile_error!("Enable only one of: rustls, native-tls.");
 
+#[cfg(all(
+    any(feature = "async", feature = "blocking"),
+    not(any(feature = "rustls", feature = "native-tls"))
+))]
+compile_error!("Enable one of: rustls, native-tls.");
+
 /// Service entry points and request builders.
 pub mod api;
 #[cfg(feature = "providers")]
@@ -70,10 +76,10 @@ mod util;
 
 pub use auth::{
     AddressingStyle, Auth, CachedProvider, Credentials, CredentialsProvider, CredentialsSnapshot,
-    DynCredentialsProvider, Region,
+    CredentialsTlsRootStore, DynCredentialsProvider, Region,
 };
-#[cfg(feature = "blocking")]
-pub use client::{BlockingClient, BlockingClientBuilder};
 #[cfg(feature = "async")]
-pub use client::{Client, ClientBuilder};
+pub use client::{AsyncTlsRootStore, Client, ClientBuilder};
+#[cfg(feature = "blocking")]
+pub use client::{BlockingClient, BlockingClientBuilder, BlockingTlsRootStore};
 pub use error::{Error, Result};

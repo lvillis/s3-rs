@@ -4,7 +4,6 @@ use std::{io, time::Duration};
 
 use bytes::Bytes;
 use futures_core::Stream;
-use futures_util::StreamExt as _;
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
 
 use crate::{
@@ -400,7 +399,7 @@ impl GetObjectRequest {
 
         let resp = self
             .client
-            .execute(
+            .execute_stream(
                 Method::GET,
                 Some(&self.bucket),
                 Some(&self.key),
@@ -411,7 +410,14 @@ impl GetObjectRequest {
             .await?;
 
         if !resp.status().is_success() {
-            return Err(response_error(resp).await);
+            let resp = resp
+                .into_response_limited(usize::MAX)
+                .await
+                .map_err(|e| Error::transport("failed to read response body", Some(Box::new(e))))?;
+            return Err(response_error(
+                crate::transport::async_transport::AsyncResponse::from_reqx(resp),
+            )
+            .await);
         }
 
         let etag = crate::util::headers::header_string(resp.headers(), http::header::ETAG);
@@ -420,10 +426,31 @@ impl GetObjectRequest {
         let content_type =
             crate::util::headers::header_string(resp.headers(), http::header::CONTENT_TYPE);
 
-        let stream = resp.bytes_stream().map(|item| match item {
-            Ok(b) => Ok(b),
-            Err(e) => Err(Error::transport("body stream error", Some(Box::new(e)))),
-        });
+        use http_body_util::BodyExt as _;
+        let stream = futures_util::stream::unfold(
+            (resp.into_body(), false),
+            |(mut body, done)| async move {
+                if done {
+                    return None;
+                }
+                loop {
+                    match body.frame().await {
+                        Some(Ok(frame)) => {
+                            if let Some(data) = frame.data_ref() {
+                                return Some((Ok(data.clone()), (body, false)));
+                            }
+                        }
+                        Some(Err(e)) => {
+                            return Some((
+                                Err(Error::transport("body stream error", Some(Box::new(e)))),
+                                (body, true),
+                            ));
+                        }
+                        None => return None,
+                    }
+                }
+            },
+        );
 
         Ok(GetObjectOutput {
             body: Box::pin(stream),
@@ -557,7 +584,7 @@ impl PutObjectRequest {
     /// Sets the request body from a byte stream.
     pub fn body_stream<S>(mut self, stream: S) -> Self
     where
-        S: Stream<Item = std::result::Result<Bytes, io::Error>> + Send + 'static,
+        S: Stream<Item = std::result::Result<Bytes, io::Error>> + Send + Sync + 'static,
     {
         self.body = AsyncBody::Stream {
             stream: Box::pin(stream),
@@ -569,7 +596,7 @@ impl PutObjectRequest {
     /// Sets a streaming body with a known content length.
     pub fn body_stream_sized<S>(mut self, stream: S, content_length: u64) -> Self
     where
-        S: Stream<Item = std::result::Result<Bytes, io::Error>> + Send + 'static,
+        S: Stream<Item = std::result::Result<Bytes, io::Error>> + Send + Sync + 'static,
     {
         self.content_length = Some(content_length);
         self.body_stream(stream)
@@ -958,7 +985,7 @@ impl UploadPartRequest {
     /// Sets the request body from a byte stream.
     pub fn body_stream<S>(mut self, stream: S) -> Self
     where
-        S: Stream<Item = std::result::Result<Bytes, io::Error>> + Send + 'static,
+        S: Stream<Item = std::result::Result<Bytes, io::Error>> + Send + Sync + 'static,
     {
         self.body = AsyncBody::Stream {
             stream: Box::pin(stream),

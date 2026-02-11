@@ -1,1 +1,21 @@
 * text=auto eol=lf
+
+# Keep shell scripts on LF across platforms.
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Common binary assets.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.7z binary
+*.gz binary
+*.bz2 binary
+*.xz binary
+*.zst binary
+*.tgz binary

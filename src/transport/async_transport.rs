@@ -1,27 +1,22 @@
-use std::{
-    io,
-    pin::Pin,
-    sync::Mutex,
-    task::{Context, Poll},
-    time::Duration,
-};
+use std::{io, pin::Pin, time::Duration};
 
 #[cfg(feature = "metrics")]
 use std::time::Instant;
 
 use bytes::Bytes;
 use futures_core::Stream;
-use http::{HeaderMap, Method, StatusCode};
-use http_body::{Body as HttpBody, Frame, SizeHint};
+use http::header::{CONTENT_LENGTH, USER_AGENT};
+use http::{HeaderMap, HeaderValue, Method, StatusCode};
+use reqx::{Client as HttpClient, Response as ReqxResponse};
 use url::Url;
 
 use crate::{
     error::{Error, Result},
-    transport::{RetryConfig, backoff_delay},
+    transport::{RetryConfig, backoff_delay, map_reqx_error, response_error_from_status},
 };
 
 type AsyncByteStream =
-    Pin<Box<dyn Stream<Item = std::result::Result<Bytes, io::Error>> + Send + 'static>>;
+    Pin<Box<dyn Stream<Item = std::result::Result<Bytes, io::Error>> + Send + Sync + 'static>>;
 
 pub(crate) enum AsyncBody {
     Empty,
@@ -46,52 +41,43 @@ impl AsyncBody {
     }
 }
 
-struct SizedStreamBody {
-    stream: Mutex<AsyncByteStream>,
-    content_length: u64,
-}
-
-impl SizedStreamBody {
-    fn new(stream: AsyncByteStream, content_length: u64) -> Self {
-        Self {
-            stream: Mutex::new(stream),
-            content_length,
-        }
-    }
-}
-
-impl HttpBody for SizedStreamBody {
-    type Data = Bytes;
-    type Error = io::Error;
-
-    fn poll_frame(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<std::result::Result<Frame<Self::Data>, Self::Error>>> {
-        let this = self.as_mut().get_mut();
-        let mut stream = match this.stream.lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                return Poll::Ready(Some(Err(io::Error::other("stream mutex poisoned"))));
-            }
-        };
-
-        match stream.as_mut().poll_next(cx) {
-            Poll::Ready(Some(Ok(chunk))) => Poll::Ready(Some(Ok(Frame::data(chunk)))),
-            Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(err))),
-            Poll::Ready(None) => Poll::Ready(None),
-            Poll::Pending => Poll::Pending,
-        }
-    }
-
-    fn size_hint(&self) -> SizeHint {
-        SizeHint::with_exact(self.content_length)
-    }
-}
-
 pub(crate) struct AsyncTransport {
-    client: reqwest::Client,
+    client: HttpClient,
     retry: RetryConfig,
+    user_agent: HeaderValue,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct AsyncResponse {
+    status: StatusCode,
+    headers: HeaderMap,
+    body: Bytes,
+}
+
+impl AsyncResponse {
+    pub(crate) fn from_reqx(resp: ReqxResponse) -> Self {
+        Self {
+            status: resp.status(),
+            headers: resp.headers().clone(),
+            body: resp.body().clone(),
+        }
+    }
+
+    pub(crate) fn status(&self) -> StatusCode {
+        self.status
+    }
+
+    pub(crate) fn headers(&self) -> &HeaderMap {
+        &self.headers
+    }
+
+    pub(crate) fn body(&self) -> &Bytes {
+        &self.body
+    }
+
+    pub(crate) async fn text(self) -> std::result::Result<String, io::Error> {
+        Ok(String::from_utf8_lossy(&self.body).into_owned())
+    }
 }
 
 impl AsyncTransport {
@@ -99,20 +85,32 @@ impl AsyncTransport {
         retry: RetryConfig,
         user_agent: Option<String>,
         timeout: Option<Duration>,
+        tls_root_store: reqx::TlsRootStore,
     ) -> Result<Self> {
-        #[cfg(feature = "rustls")]
-        crate::transport::tls::ensure_rustls_crypto_provider();
+        let user_agent_text = user_agent.unwrap_or_else(default_user_agent);
+        let user_agent = HeaderValue::from_str(&user_agent_text)
+            .map_err(|_| Error::invalid_config("invalid User-Agent header"))?;
 
-        let mut builder = reqwest::Client::builder();
+        let mut builder = HttpClient::builder("http://localhost")
+            .client_name(user_agent_text)
+            .retry_policy(reqx::RetryPolicy::disabled())
+            .max_response_body_bytes(usize::MAX)
+            .tls_backend(default_tls_backend())
+            .tls_root_store(tls_root_store);
+
         if let Some(timeout) = timeout {
-            builder = builder.timeout(timeout);
+            builder = builder.request_timeout(timeout);
         }
-        builder = builder.user_agent(user_agent.unwrap_or_else(default_user_agent));
+
         let client = builder
             .build()
-            .map_err(|e| Error::transport("failed to build HTTP client", Some(Box::new(e))))?;
+            .map_err(|e| map_reqx_error("failed to build HTTP client", e))?;
 
-        Ok(Self { client, retry })
+        Ok(Self {
+            client,
+            retry,
+            user_agent,
+        })
     }
 
     pub(crate) async fn send(
@@ -121,7 +119,7 @@ impl AsyncTransport {
         url: Url,
         headers: HeaderMap,
         body: AsyncBody,
-    ) -> Result<reqwest::Response> {
+    ) -> Result<AsyncResponse> {
         match body {
             body @ AsyncBody::Stream { .. } => {
                 #[cfg(feature = "metrics")]
@@ -156,7 +154,7 @@ impl AsyncTransport {
                             )
                             .record(start.elapsed().as_secs_f64());
                         }
-                        Ok(resp)
+                        Ok(AsyncResponse::from_reqx(resp))
                     }
                     Err(err) => {
                         #[cfg(feature = "metrics")]
@@ -166,7 +164,7 @@ impl AsyncTransport {
                             "kind" => "transport"
                         )
                         .increment(1);
-                        Err(Error::transport("request failed", Some(Box::new(err))))
+                        Err(map_reqx_error("request failed", err))
                     }
                 }
             }
@@ -222,12 +220,17 @@ impl AsyncTransport {
                                     "reason" => "status"
                                 )
                                 .increment(1);
-                                let delay = retry_delay_from_response(self.retry, attempt, &resp);
+                                let delay = retry_delay_from_response(
+                                    self.retry,
+                                    attempt,
+                                    resp.status(),
+                                    resp.headers(),
+                                );
                                 drop(resp);
                                 tokio::time::sleep(delay).await;
                                 continue;
                             }
-                            return Ok(resp);
+                            return Ok(AsyncResponse::from_reqx(resp));
                         }
                         Err(err) => {
                             if attempt < max_attempts && should_retry_error(&err) {
@@ -249,7 +252,7 @@ impl AsyncTransport {
                                 "kind" => "transport"
                             )
                             .increment(1);
-                            return Err(Error::transport("request failed", Some(Box::new(err))));
+                            return Err(map_reqx_error("request failed", err));
                         }
                     }
                 }
@@ -266,88 +269,114 @@ impl AsyncTransport {
         }
     }
 
+    pub(crate) async fn send_stream(
+        &self,
+        method: Method,
+        url: Url,
+        headers: HeaderMap,
+        body: AsyncBody,
+    ) -> Result<reqx::ResponseStream> {
+        match body {
+            body @ AsyncBody::Stream { .. } => {
+                let req = self.build_request(&method, url, headers, body)?;
+                req.send_stream()
+                    .await
+                    .map_err(|err| map_reqx_error("request failed", err))
+            }
+            replayable => {
+                let max_attempts = self.retry.max_attempts;
+                for attempt in 1..=max_attempts {
+                    let current_body = replayable
+                        .clone_for_retry()
+                        .ok_or_else(|| Error::transport("request body is not replayable", None))?;
+                    let req =
+                        self.build_request(&method, url.clone(), headers.clone(), current_body)?;
+
+                    match req.send_stream().await {
+                        Ok(resp) => {
+                            if should_retry_status(resp.status()) && attempt < max_attempts {
+                                let delay = retry_delay_from_response(
+                                    self.retry,
+                                    attempt,
+                                    resp.status(),
+                                    resp.headers(),
+                                );
+                                drop(resp);
+                                tokio::time::sleep(delay).await;
+                                continue;
+                            }
+                            return Ok(resp);
+                        }
+                        Err(err) => {
+                            if attempt < max_attempts && should_retry_error(&err) {
+                                let delay = backoff_delay(self.retry, attempt);
+                                tokio::time::sleep(delay).await;
+                                continue;
+                            }
+                            return Err(map_reqx_error("request failed", err));
+                        }
+                    }
+                }
+
+                Err(Error::transport("request failed after retries", None))
+            }
+        }
+    }
+
     fn build_request(
         &self,
         method: &Method,
         url: Url,
         headers: HeaderMap,
         body: AsyncBody,
-    ) -> Result<reqwest::RequestBuilder> {
-        let mut req = self.client.request(method.clone(), url).headers(headers);
+    ) -> Result<reqx::RequestBuilder<'_>> {
+        let mut req = self
+            .client
+            .request(method.clone(), url.as_str().to_string())
+            .retry_policy(reqx::RetryPolicy::disabled())
+            .status_policy(reqx::StatusPolicy::Response)
+            .header(USER_AGENT, self.user_agent.clone());
+
+        for (name, value) in headers {
+            if let Some(name) = name {
+                req = req.header(name, value);
+            }
+        }
+
         req = match body {
             AsyncBody::Empty => req,
-            AsyncBody::Bytes(b) => req.body(b),
+            AsyncBody::Bytes(b) => req.body_bytes(b),
             AsyncBody::Stream {
                 stream,
                 content_length,
-            } => match content_length {
-                Some(len) => req.body(reqwest::Body::wrap(SizedStreamBody::new(stream, len))),
-                None => req.body(reqwest::Body::wrap_stream(stream)),
-            },
+            } => {
+                let mut req = req.body_stream(stream);
+                if let Some(len) = content_length {
+                    let value = HeaderValue::from_str(&len.to_string())
+                        .map_err(|_| Error::invalid_config("invalid Content-Length header"))?;
+                    req = req.header(CONTENT_LENGTH, value);
+                }
+                req
+            }
         };
+
         Ok(req)
     }
 }
 
-pub(crate) async fn response_error(resp: reqwest::Response) -> Error {
-    let status = resp.status();
-
-    let request_id = resp
-        .headers()
-        .get("x-amz-request-id")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.to_string());
-
-    if status == StatusCode::TOO_MANY_REQUESTS {
-        let retry_after = resp
-            .headers()
-            .get(http::header::RETRY_AFTER)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse::<u64>().ok())
-            .map(Duration::from_secs);
-
-        return Error::RateLimited {
-            retry_after,
-            request_id,
-        };
-    }
-
-    let body_bytes = match resp.bytes().await {
-        Ok(b) => b,
-        Err(_) => Bytes::new(),
-    };
-    let body_str = String::from_utf8_lossy(&body_bytes).to_string();
-    let snippet = crate::util::text::truncate_snippet(&body_str, 4096);
-
-    if let Some(parsed) = crate::util::xml::parse_error_xml(&body_str) {
-        return Error::Api {
-            status,
-            code: parsed.code,
-            message: parsed.message,
-            request_id: parsed.request_id.or(request_id),
-            host_id: parsed.host_id,
-            body_snippet: Some(snippet),
-        };
-    }
-
-    Error::Api {
-        status,
-        code: None,
-        message: None,
-        request_id,
-        host_id: None,
-        body_snippet: Some(snippet),
-    }
+pub(crate) async fn response_error(resp: AsyncResponse) -> Error {
+    let body_str = String::from_utf8_lossy(resp.body()).to_string();
+    response_error_from_status(resp.status(), resp.headers(), &body_str)
 }
 
 fn retry_delay_from_response(
     config: RetryConfig,
     attempt: u32,
-    resp: &reqwest::Response,
+    status: StatusCode,
+    headers: &HeaderMap,
 ) -> Duration {
-    if resp.status() == StatusCode::TOO_MANY_REQUESTS
-        && let Some(retry_after) = resp
-            .headers()
+    if status == StatusCode::TOO_MANY_REQUESTS
+        && let Some(retry_after) = headers
             .get(http::header::RETRY_AFTER)
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.parse::<u64>().ok())
@@ -361,8 +390,27 @@ fn should_retry_status(status: StatusCode) -> bool {
     status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
 }
 
-fn should_retry_error(err: &reqwest::Error) -> bool {
-    err.is_connect() || err.is_timeout() || err.is_request() || err.is_body()
+fn should_retry_error(err: &reqx::Error) -> bool {
+    matches!(
+        err,
+        reqx::Error::Transport { .. }
+            | reqx::Error::Timeout { .. }
+            | reqx::Error::DeadlineExceeded { .. }
+            | reqx::Error::ReadBody { .. }
+    )
+}
+
+fn default_tls_backend() -> reqx::TlsBackend {
+    #[cfg(feature = "rustls")]
+    {
+        return reqx::TlsBackend::RustlsRing;
+    }
+    #[cfg(all(not(feature = "rustls"), feature = "native-tls"))]
+    {
+        return reqx::TlsBackend::NativeTls;
+    }
+    #[allow(unreachable_code)]
+    reqx::TlsBackend::RustlsRing
 }
 
 #[cfg(feature = "metrics")]
@@ -483,7 +531,12 @@ mod tests {
             max_attempts: 1,
             ..RetryConfig::default()
         };
-        let transport = AsyncTransport::new(retry, None, Some(Duration::from_secs(5)))?;
+        let transport = AsyncTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::BackendDefault,
+        )?;
         let url = Url::parse(&format!("http://{addr}/"))
             .map_err(|_| Error::invalid_config("invalid test server URL"))?;
 
@@ -509,7 +562,12 @@ mod tests {
             max_attempts: 1,
             ..RetryConfig::default()
         };
-        let transport = AsyncTransport::new(retry, None, Some(Duration::from_secs(5)))?;
+        let transport = AsyncTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::BackendDefault,
+        )?;
         let url = Url::parse(&format!("http://{addr}/"))
             .map_err(|_| Error::invalid_config("invalid test server URL"))?;
 
@@ -555,7 +613,12 @@ mod tests {
             max_attempts: 1,
             ..RetryConfig::default()
         };
-        let transport = AsyncTransport::new(retry, None, Some(Duration::from_secs(5)))?;
+        let transport = AsyncTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::BackendDefault,
+        )?;
         let url = Url::parse(&format!("http://{addr}/"))
             .map_err(|_| Error::invalid_config("invalid test server URL"))?;
 
@@ -600,7 +663,12 @@ mod tests {
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_millis(0),
         };
-        let transport = AsyncTransport::new(retry, None, Some(Duration::from_secs(5)))?;
+        let transport = AsyncTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::BackendDefault,
+        )?;
         let url = Url::parse(&format!("http://{addr}/"))
             .map_err(|_| Error::invalid_config("invalid test server URL"))?;
 

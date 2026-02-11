@@ -10,6 +10,8 @@ Most async examples support:
 - `S3_TEST_REGION` (default: `us-east-1`)
 - `S3_TEST_BUCKET` (required for object ops)
 - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`
+- `S3_TLS_ROOT_STORE` (optional: `backend-default` / `webpki` / `system`)
+- `S3_CREDENTIALS_TLS_ROOT_STORE` (optional, IMDS/STS examples only: `backend-default` / `webpki` / `system`)
 
 ## Index
 
@@ -24,9 +26,11 @@ Most async examples support:
 - `async_presign_build_async.rs`: presign with a credentials provider (`build_async`)
 - `async_auth_imds.rs`: IMDS credentials (`--features credentials-imds`)
 - `async_auth_web_identity.rs`: web identity credentials (`--features credentials-sts`)
+- `async_tls_root_store.rs`: async request TLS root policy (`S3_TLS_ROOT_STORE`)
 - `blocking_put_get_delete.rs`: blocking put/get/delete
 - `blocking_list_buckets.rs`: blocking list buckets
 - `blocking_presign_get.rs`: blocking presign with static credentials
+- `blocking_tls_root_store.rs`: blocking request TLS root policy (`S3_TLS_ROOT_STORE`)
 - `minio_local_put_get_delete.rs`: `providers::minio_local()` preset (`--features providers`)
 - `r2_put_get_delete.rs`: Cloudflare R2 preset (`--features providers`)
   - Optional: `R2_JURISDICTION` (e.g. `eu`, `fedramp`) for jurisdiction-restricted buckets
