@@ -386,7 +386,25 @@ fn default_tls_backend() -> reqx::TlsBackend {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
+
+    #[cfg(all(feature = "async", feature = "native-tls", not(feature = "rustls")))]
+    fn assert_native_tls_webpki_error(err: Error) {
+        match err {
+            Error::Transport {
+                source: Some(source),
+                ..
+            } => {
+                assert!(
+                    source.to_string().contains("TlsRootStore::WebPki"),
+                    "unexpected source error: {source}"
+                );
+            }
+            other => panic!("expected transport error, got {other:?}"),
+        }
+    }
 
     #[test]
     fn deserializes_and_converts_metadata_credentials() {
@@ -426,6 +444,57 @@ mod tests {
         assert_eq!(
             snapshot.expires_at(),
             Some(parse_expiration("2020-01-01T00:00:00Z").unwrap())
+        );
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn metadata_async_client_accepts_backend_default() {
+        let client =
+            metadata_async_client(Duration::from_secs(1), reqx::TlsRootStore::BackendDefault);
+        assert!(client.is_ok(), "async metadata client should build");
+    }
+
+    #[cfg(all(feature = "async", feature = "rustls"))]
+    #[test]
+    fn metadata_async_client_accepts_webpki_on_rustls() {
+        let client = metadata_async_client(Duration::from_secs(1), reqx::TlsRootStore::WebPki);
+        assert!(client.is_ok(), "rustls should accept WebPki root store");
+    }
+
+    #[cfg(all(feature = "async", feature = "native-tls", not(feature = "rustls")))]
+    #[test]
+    fn metadata_async_client_rejects_webpki_on_native_tls() {
+        let err = match metadata_async_client(Duration::from_secs(1), reqx::TlsRootStore::WebPki) {
+            Ok(_) => panic!("native-tls should reject WebPki root store"),
+            Err(err) => err,
+        };
+        assert_native_tls_webpki_error(err);
+    }
+
+    #[cfg(feature = "blocking")]
+    #[test]
+    fn metadata_blocking_client_accepts_backend_default() {
+        let client =
+            metadata_blocking_client(Duration::from_secs(1), reqx::TlsRootStore::BackendDefault);
+        assert!(client.is_ok(), "blocking metadata client should build");
+    }
+
+    #[cfg(all(feature = "blocking", feature = "rustls"))]
+    #[test]
+    fn metadata_blocking_client_accepts_webpki_on_rustls() {
+        let client = metadata_blocking_client(Duration::from_secs(1), reqx::TlsRootStore::WebPki);
+        assert!(client.is_ok(), "rustls should accept WebPki root store");
+    }
+
+    #[cfg(all(feature = "blocking", feature = "native-tls", not(feature = "rustls")))]
+    #[test]
+    fn metadata_blocking_client_accepts_webpki_on_native_tls() {
+        // reqx blocking transport (ureq backend) accepts WebPki roots on native-tls.
+        let client = metadata_blocking_client(Duration::from_secs(1), reqx::TlsRootStore::WebPki);
+        assert!(
+            client.is_ok(),
+            "native-tls should build with WebPki root store"
         );
     }
 }

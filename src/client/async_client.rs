@@ -377,3 +377,62 @@ impl AsyncTlsRootStore {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builder_defaults_tls_root_store_to_backend_default() {
+        let builder = ClientBuilder::new("https://s3.example.com").expect("builder should parse");
+        assert_eq!(builder.tls_root_store, AsyncTlsRootStore::BackendDefault);
+    }
+
+    #[test]
+    fn builder_tls_root_store_override_is_applied() {
+        let builder = ClientBuilder::new("https://s3.example.com")
+            .expect("builder should parse")
+            .tls_root_store(AsyncTlsRootStore::System);
+        assert_eq!(builder.tls_root_store, AsyncTlsRootStore::System);
+    }
+
+    #[cfg(feature = "rustls")]
+    #[test]
+    fn build_accepts_webpki_on_rustls() {
+        let client = Client::builder("https://s3.example.com")
+            .expect("builder should parse")
+            .region("us-east-1")
+            .auth(Auth::Anonymous)
+            .tls_root_store(AsyncTlsRootStore::WebPki)
+            .build();
+        assert!(client.is_ok(), "rustls should accept WebPki root store");
+    }
+
+    #[cfg(all(feature = "native-tls", not(feature = "rustls")))]
+    #[test]
+    fn build_rejects_webpki_on_native_tls() {
+        let err = match Client::builder("https://s3.example.com")
+            .expect("builder should parse")
+            .region("us-east-1")
+            .auth(Auth::Anonymous)
+            .tls_root_store(AsyncTlsRootStore::WebPki)
+            .build()
+        {
+            Ok(_) => panic!("native-tls should reject WebPki root store"),
+            Err(err) => err,
+        };
+
+        match err {
+            Error::Transport {
+                source: Some(source),
+                ..
+            } => {
+                assert!(
+                    source.to_string().contains("TlsRootStore::WebPki"),
+                    "unexpected source error: {source}"
+                );
+            }
+            other => panic!("expected transport error, got {other:?}"),
+        }
+    }
+}

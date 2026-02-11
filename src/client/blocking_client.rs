@@ -334,3 +334,51 @@ impl BlockingTlsRootStore {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builder_defaults_tls_root_store_to_backend_default() {
+        let builder =
+            BlockingClientBuilder::new("https://s3.example.com").expect("builder should parse");
+        assert_eq!(builder.tls_root_store, BlockingTlsRootStore::BackendDefault);
+    }
+
+    #[test]
+    fn builder_tls_root_store_override_is_applied() {
+        let builder = BlockingClientBuilder::new("https://s3.example.com")
+            .expect("builder should parse")
+            .tls_root_store(BlockingTlsRootStore::System);
+        assert_eq!(builder.tls_root_store, BlockingTlsRootStore::System);
+    }
+
+    #[cfg(feature = "rustls")]
+    #[test]
+    fn build_accepts_webpki_on_rustls() {
+        let client = BlockingClient::builder("https://s3.example.com")
+            .expect("builder should parse")
+            .region("us-east-1")
+            .auth(Auth::Anonymous)
+            .tls_root_store(BlockingTlsRootStore::WebPki)
+            .build();
+        assert!(client.is_ok(), "rustls should accept WebPki root store");
+    }
+
+    #[cfg(all(feature = "native-tls", not(feature = "rustls")))]
+    #[test]
+    fn build_accepts_webpki_on_native_tls() {
+        // reqx blocking transport (ureq backend) accepts WebPki roots on native-tls.
+        let client = BlockingClient::builder("https://s3.example.com")
+            .expect("builder should parse")
+            .region("us-east-1")
+            .auth(Auth::Anonymous)
+            .tls_root_store(BlockingTlsRootStore::WebPki)
+            .build();
+        assert!(
+            client.is_ok(),
+            "native-tls should build with WebPki root store"
+        );
+    }
+}

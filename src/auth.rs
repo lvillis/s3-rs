@@ -903,6 +903,26 @@ mod tests {
         assert!(dbg.contains("<redacted>"));
     }
 
+    #[cfg(all(
+        any(feature = "async", feature = "blocking"),
+        any(feature = "credentials-imds", feature = "credentials-sts")
+    ))]
+    #[test]
+    fn credentials_tls_root_store_maps_to_reqx_variants() {
+        assert_eq!(
+            CredentialsTlsRootStore::BackendDefault.into_reqx(),
+            reqx::TlsRootStore::BackendDefault
+        );
+        assert_eq!(
+            CredentialsTlsRootStore::WebPki.into_reqx(),
+            reqx::TlsRootStore::WebPki
+        );
+        assert_eq!(
+            CredentialsTlsRootStore::System.into_reqx(),
+            reqx::TlsRootStore::System
+        );
+    }
+
     #[derive(Debug)]
     struct CountingFailProvider {
         calls: Arc<AtomicUsize>,
