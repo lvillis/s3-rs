@@ -3,6 +3,10 @@
 ### 🐛 Bug Fixes
 
 - *(transport)* Add HEAD content-encoding regression coverage for async and blocking
+
+### ⚙️ Miscellaneous Tasks
+
+- Release s3 version 0.1.10
 ## [0.1.9] - 2026-02-11
 
 ### 🚀 Features
