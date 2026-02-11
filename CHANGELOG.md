@@ -1,3 +1,17 @@
+## [0.1.9] - 2026-02-11
+
+### 🚀 Features
+
+- *(store)* Switch transport to reqx with configurable TLS root stores
+
+### 🧪 Testing
+
+- *(store)* Add TLS root-store coverage for client and credential flows
+## [0.1.8] - 2026-01-12
+
+### ⚙️ Miscellaneous Tasks
+
+- Release s3 version 0.1.8
 ## [0.1.7] - 2026-01-12
 
 ### 🚀 Features
@@ -17,42 +31,23 @@
 
 ### 🧪 Testing
 
+- Fix MinIO virtual-hosted integration by creating buckets via path-style
 - *(store)* Rename and stabilize s3_compat integration tests
 - *(store)* Make s3_compat tests strictness configurable
-
-### ⚙️ Miscellaneous Tasks
-
-- Add rustfs integration tests
-- Release s3 version 0.1.5
-## [0.1.4] - 2026-01-06
-
-### 🧪 Testing
-
-- Fix MinIO virtual-hosted integration by creating buckets via path-style
 
 ### ⚙️ Miscellaneous Tasks
 
 - *(ci)* Update ci.yaml
 - *(ci)* Set MINIO_DOMAIN for vhost tests
 - Release s3 version 0.1.4
+- Add rustfs integration tests
+- Release s3 version 0.1.5
 ## [0.1.3] - 2026-01-06
 
 ### 🚀 Features
 
 - *(providers)* Add rule-based presets and AwsRegion helpers
 - *(auth)* Add credential providers with cached auto-refresh
-
-### 🧪 Testing
-
-- Expand coverage for cached credentials, transport, and MinIO vhost
-
-### ⚙️ Miscellaneous Tasks
-
-- *(examples)* Add practical async/blocking usage examples
-- *(ci)* Update
-- *(examples)* Add more runnable usage guides
-- Release s3 version 0.1.3
-## [0.1.2] - 2026-01-06
 
 ### 🐛 Bug Fixes
 
@@ -63,11 +58,16 @@
 
 - Harden MinIO integration suite
 - *(ci)* Skip unsupported bucket config ops in MinIO integration
+- Expand coverage for cached credentials, transport, and MinIO vhost
 
 ### ⚙️ Miscellaneous Tasks
 
 - *(bench)* Add criterion microbench suite
 - Release s3 version 0.1.2
+- *(examples)* Add practical async/blocking usage examples
+- *(ci)* Update
+- *(examples)* Add more runnable usage guides
+- Release s3 version 0.1.3
 ## [0.1.1] - 2026-01-05
 
 ### 🐛 Bug Fixes
