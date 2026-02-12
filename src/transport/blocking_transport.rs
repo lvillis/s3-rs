@@ -11,8 +11,13 @@ use url::Url;
 
 use crate::{
     error::{Error, Result},
-    transport::{RetryConfig, backoff_delay, map_reqx_error, response_error_from_status},
+    transport::{
+        RetryConfig, backoff_delay, map_reqx_error, response_error_from_status,
+        retry_after_from_headers,
+    },
 };
+
+const MAX_BUFFERED_RESPONSE_BODY_BYTES: usize = 32 * 1024 * 1024;
 
 pub(crate) enum BlockingBody {
     Empty,
@@ -93,7 +98,8 @@ impl BlockingTransport {
         let mut builder = reqx::blocking::Client::builder("http://localhost")
             .client_name(user_agent_text)
             .retry_policy(reqx::RetryPolicy::disabled())
-            .max_response_body_bytes(usize::MAX)
+            .redirect_policy(reqx::RedirectPolicy::none())
+            .max_response_body_bytes(MAX_BUFFERED_RESPONSE_BODY_BYTES)
             .tls_backend(default_tls_backend())
             .tls_root_store(tls_root_store);
 
@@ -303,6 +309,7 @@ impl BlockingTransport {
             .client
             .request(method.clone(), url.as_str().to_string())
             .retry_policy(reqx::RetryPolicy::disabled())
+            .redirect_policy(reqx::RedirectPolicy::none())
             .status_policy(reqx::StatusPolicy::Response)
             .header(USER_AGENT, self.user_agent.clone());
 
@@ -332,12 +339,9 @@ fn retry_delay_from_response(
     headers: &HeaderMap,
 ) -> Duration {
     if status == StatusCode::TOO_MANY_REQUESTS
-        && let Some(retry_after) = headers
-            .get(http::header::RETRY_AFTER)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse::<u64>().ok())
+        && let Some(retry_after) = retry_after_from_headers(headers)
     {
-        return Duration::from_secs(retry_after);
+        return retry_after;
     }
     backoff_delay(config, attempt)
 }
@@ -624,6 +628,228 @@ mod tests {
             Some("zstd")
         );
         assert!(body.into_reader().into_inner().is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn send_does_not_retry_on_non_retryable_4xx_status() -> Result<()> {
+        let (addr, handle, hits) = spawn_test_server(vec![
+            b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+        ])?;
+
+        let retry = RetryConfig {
+            max_attempts: 3,
+            base_delay: Duration::from_millis(0),
+            max_delay: Duration::from_millis(0),
+        };
+        let transport = BlockingTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::System,
+        )?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp = transport.send(Method::GET, url, HeaderMap::new(), BlockingBody::Empty)?;
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        Ok(())
+    }
+
+    #[test]
+    fn send_retries_on_retryable_5xx_status() -> Result<()> {
+        let (addr, handle, hits) = spawn_test_server(vec![
+            b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .to_vec(),
+            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+        ])?;
+
+        let retry = RetryConfig {
+            max_attempts: 2,
+            base_delay: Duration::from_millis(0),
+            max_delay: Duration::from_millis(0),
+        };
+        let transport = BlockingTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::System,
+        )?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp = transport.send(Method::GET, url, HeaderMap::new(), BlockingBody::Empty)?;
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        assert_eq!(resp.status(), StatusCode::OK);
+        Ok(())
+    }
+
+    #[test]
+    fn send_retries_on_transport_error_for_replayable_body() -> Result<()> {
+        let (addr, handle, hits) = spawn_test_server(vec![
+            Vec::new(),
+            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+        ])?;
+
+        let retry = RetryConfig {
+            max_attempts: 2,
+            base_delay: Duration::from_millis(0),
+            max_delay: Duration::from_millis(0),
+        };
+        let transport = BlockingTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::System,
+        )?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp = transport.send(Method::GET, url, HeaderMap::new(), BlockingBody::Empty)?;
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        assert_eq!(resp.status(), StatusCode::OK);
+        Ok(())
+    }
+
+    #[test]
+    fn send_stream_preserves_content_encoding_and_raw_bytes() -> Result<()> {
+        let gzipped = vec![
+            0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xcb, 0x48, 0xcd, 0xc9,
+            0xc9, 0x07, 0x00, 0x86, 0xa6, 0x10, 0x36, 0x05, 0x00, 0x00, 0x00,
+        ];
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            gzipped.len()
+        );
+        let mut wire = response.into_bytes();
+        wire.extend_from_slice(&gzipped);
+        let (addr, handle, _) = spawn_test_server(vec![wire])?;
+
+        let retry = RetryConfig::default();
+        let transport = BlockingTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::System,
+        )?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp =
+            transport.send_stream(Method::GET, url, HeaderMap::new(), BlockingBody::Empty)?;
+        assert_eq!(
+            resp.headers()
+                .get(http::header::CONTENT_ENCODING)
+                .and_then(|v| v.to_str().ok()),
+            Some("gzip")
+        );
+        let mut reader = resp.into_body().into_reader();
+        let mut out = Vec::new();
+        reader
+            .read_to_end(&mut out)
+            .map_err(|e| Error::transport("failed to read response body", Some(Box::new(e))))?;
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+        assert_eq!(out, gzipped);
+        Ok(())
+    }
+
+    #[test]
+    fn send_stream_body_read_error_is_observable() -> Result<()> {
+        let (addr, handle, _) = spawn_test_server(vec![
+            b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nabc".to_vec(),
+        ])?;
+
+        let retry = RetryConfig::default();
+        let transport = BlockingTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::System,
+        )?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp =
+            transport.send_stream(Method::GET, url, HeaderMap::new(), BlockingBody::Empty)?;
+        let mut reader = resp.into_body().into_reader();
+        let mut out = Vec::new();
+        let read = reader.read_to_end(&mut out);
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+        assert!(read.is_err(), "expected read error for truncated response");
+        Ok(())
+    }
+
+    #[test]
+    fn send_stream_into_response_limited_enforces_limit() -> Result<()> {
+        let payload = "x".repeat(2048);
+        let response = format!(
+            "HTTP/1.1 403 Forbidden\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            payload.len(),
+            payload
+        );
+        let (addr, handle, _) = spawn_test_server(vec![response.into_bytes()])?;
+
+        let retry = RetryConfig::default();
+        let transport = BlockingTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::System,
+        )?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp =
+            transport.send_stream(Method::GET, url, HeaderMap::new(), BlockingBody::Empty)?;
+        let limited = resp.into_response_limited(1024);
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+        assert!(limited.is_err(), "expected body limit error");
+        Ok(())
+    }
+
+    #[test]
+    fn send_follows_redirect_on_blocking_backend() -> Result<()> {
+        let (addr, handle, hits) = spawn_test_server(vec![
+            b"HTTP/1.1 301 Moved Permanently\r\nLocation: /next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+        ])?;
+
+        let retry = RetryConfig::default();
+        let transport = BlockingTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::System,
+        )?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp = transport.send(Method::GET, url, HeaderMap::new(), BlockingBody::Empty)?;
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        assert_eq!(resp.status(), StatusCode::OK);
         Ok(())
     }
 }

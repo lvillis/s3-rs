@@ -6,6 +6,8 @@
 
 Lean, modern, unofficial S3-compatible client for Rust.
 
+![s3-rs logo](examples/assets/s3-rs-logo.svg)
+
 ## Highlights
 
 - Async + blocking clients (consistent API shape)

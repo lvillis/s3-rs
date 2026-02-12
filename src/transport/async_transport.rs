@@ -12,8 +12,13 @@ use url::Url;
 
 use crate::{
     error::{Error, Result},
-    transport::{RetryConfig, backoff_delay, map_reqx_error, response_error_from_status},
+    transport::{
+        RetryConfig, backoff_delay, map_reqx_error, response_error_from_status,
+        retry_after_from_headers,
+    },
 };
+
+const MAX_BUFFERED_RESPONSE_BODY_BYTES: usize = 32 * 1024 * 1024;
 
 type AsyncByteStream =
     Pin<Box<dyn Stream<Item = std::result::Result<Bytes, io::Error>> + Send + Sync + 'static>>;
@@ -94,7 +99,8 @@ impl AsyncTransport {
         let mut builder = HttpClient::builder("http://localhost")
             .client_name(user_agent_text)
             .retry_policy(reqx::RetryPolicy::disabled())
-            .max_response_body_bytes(usize::MAX)
+            .redirect_policy(reqx::RedirectPolicy::none())
+            .max_response_body_bytes(MAX_BUFFERED_RESPONSE_BODY_BYTES)
             .tls_backend(default_tls_backend())
             .tls_root_store(tls_root_store);
 
@@ -334,6 +340,7 @@ impl AsyncTransport {
             .client
             .request(method.clone(), url.as_str().to_string())
             .retry_policy(reqx::RetryPolicy::disabled())
+            .redirect_policy(reqx::RedirectPolicy::none())
             .status_policy(reqx::StatusPolicy::Response)
             .header(USER_AGENT, self.user_agent.clone());
 
@@ -376,12 +383,9 @@ fn retry_delay_from_response(
     headers: &HeaderMap,
 ) -> Duration {
     if status == StatusCode::TOO_MANY_REQUESTS
-        && let Some(retry_after) = headers
-            .get(http::header::RETRY_AFTER)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse::<u64>().ok())
+        && let Some(retry_after) = retry_after_from_headers(headers)
     {
-        return Duration::from_secs(retry_after);
+        return retry_after;
     }
     backoff_delay(config, attempt)
 }
@@ -719,6 +723,292 @@ mod tests {
 
         assert_eq!(hits.load(Ordering::SeqCst), 2);
         assert_eq!(resp.status(), StatusCode::OK);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn send_does_not_retry_on_non_retryable_4xx_status() -> Result<()> {
+        let (addr, handle, hits) = spawn_test_server(vec![
+            b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+        ])?;
+
+        let retry = RetryConfig {
+            max_attempts: 3,
+            base_delay: Duration::from_millis(0),
+            max_delay: Duration::from_millis(0),
+        };
+        let transport = AsyncTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::BackendDefault,
+        )?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp = transport
+            .send(Method::GET, url, HeaderMap::new(), AsyncBody::Empty)
+            .await?;
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn send_retries_on_retryable_5xx_status() -> Result<()> {
+        let (addr, handle, hits) = spawn_test_server(vec![
+            b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .to_vec(),
+            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+        ])?;
+
+        let retry = RetryConfig {
+            max_attempts: 2,
+            base_delay: Duration::from_millis(0),
+            max_delay: Duration::from_millis(0),
+        };
+        let transport = AsyncTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::BackendDefault,
+        )?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp = transport
+            .send(Method::GET, url, HeaderMap::new(), AsyncBody::Empty)
+            .await?;
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        assert_eq!(resp.status(), StatusCode::OK);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn send_retries_on_transport_error_for_replayable_body() -> Result<()> {
+        let (addr, handle, hits) = spawn_test_server(vec![
+            Vec::new(),
+            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+        ])?;
+
+        let retry = RetryConfig {
+            max_attempts: 2,
+            base_delay: Duration::from_millis(0),
+            max_delay: Duration::from_millis(0),
+        };
+        let transport = AsyncTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::BackendDefault,
+        )?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp = transport
+            .send(Method::GET, url, HeaderMap::new(), AsyncBody::Empty)
+            .await?;
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        assert_eq!(resp.status(), StatusCode::OK);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn send_stream_does_not_retry_for_non_replayable_body() -> Result<()> {
+        let (addr, handle, hits) = spawn_test_server(vec![
+            b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+        ])?;
+
+        let retry = RetryConfig {
+            max_attempts: 3,
+            base_delay: Duration::from_millis(0),
+            max_delay: Duration::from_millis(0),
+        };
+        let transport = AsyncTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::BackendDefault,
+        )?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+        let body = AsyncBody::Stream {
+            stream: Box::pin(futures_util::stream::empty::<
+                std::result::Result<Bytes, io::Error>,
+            >()),
+            content_length: Some(0),
+        };
+
+        let resp = transport
+            .send_stream(Method::PUT, url, HeaderMap::new(), body)
+            .await?;
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn send_stream_preserves_content_encoding_and_raw_bytes() -> Result<()> {
+        let gzipped = vec![
+            0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xcb, 0x48, 0xcd, 0xc9,
+            0xc9, 0x07, 0x00, 0x86, 0xa6, 0x10, 0x36, 0x05, 0x00, 0x00, 0x00,
+        ];
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            gzipped.len()
+        );
+        let mut wire = response.into_bytes();
+        wire.extend_from_slice(&gzipped);
+        let (addr, handle, _) = spawn_test_server(vec![wire])?;
+
+        let retry = RetryConfig::default();
+        let transport = AsyncTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::BackendDefault,
+        )?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp = transport
+            .send_stream(Method::GET, url, HeaderMap::new(), AsyncBody::Empty)
+            .await?;
+        assert_eq!(
+            resp.headers()
+                .get(http::header::CONTENT_ENCODING)
+                .and_then(|v| v.to_str().ok()),
+            Some("gzip")
+        );
+
+        use http_body_util::BodyExt as _;
+        let mut body = resp.into_body();
+        let mut out = Vec::new();
+        while let Some(frame) = body.frame().await {
+            let frame =
+                frame.map_err(|e| Error::transport("body stream error", Some(Box::new(e))))?;
+            if let Some(data) = frame.data_ref() {
+                out.extend_from_slice(data);
+            }
+        }
+
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+        assert_eq!(out, gzipped);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn send_stream_body_read_error_is_observable() -> Result<()> {
+        let response =
+            b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nabc".to_vec();
+        let (addr, handle, _) = spawn_test_server(vec![response])?;
+
+        let retry = RetryConfig::default();
+        let transport = AsyncTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::BackendDefault,
+        )?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp = transport
+            .send_stream(Method::GET, url, HeaderMap::new(), AsyncBody::Empty)
+            .await?;
+        use http_body_util::BodyExt as _;
+        let mut body = resp.into_body();
+        let mut saw_error = false;
+        while let Some(frame) = body.frame().await {
+            if frame.is_err() {
+                saw_error = true;
+                break;
+            }
+        }
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+        assert!(
+            saw_error,
+            "expected body stream error for truncated response"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn send_stream_into_response_limited_enforces_limit() -> Result<()> {
+        let payload = "x".repeat(2048);
+        let response = format!(
+            "HTTP/1.1 403 Forbidden\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            payload.len(),
+            payload
+        );
+        let (addr, handle, _) = spawn_test_server(vec![response.into_bytes()])?;
+
+        let retry = RetryConfig::default();
+        let transport = AsyncTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::BackendDefault,
+        )?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp = transport
+            .send_stream(Method::GET, url, HeaderMap::new(), AsyncBody::Empty)
+            .await?;
+        let limited = resp.into_response_limited(1024).await;
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+        assert!(limited.is_err(), "expected body limit error");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn send_does_not_follow_redirect_by_default() -> Result<()> {
+        let (addr, handle, hits) = spawn_test_server(vec![
+            b"HTTP/1.1 301 Moved Permanently\r\nLocation: /next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+        ])?;
+
+        let retry = RetryConfig::default();
+        let transport = AsyncTransport::new(
+            retry,
+            None,
+            Some(Duration::from_secs(5)),
+            reqx::TlsRootStore::BackendDefault,
+        )?;
+        let url = Url::parse(&format!("http://{addr}/"))
+            .map_err(|_| Error::invalid_config("invalid test server URL"))?;
+
+        let resp = transport
+            .send(Method::GET, url, HeaderMap::new(), AsyncBody::Empty)
+            .await?;
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert_eq!(resp.status(), StatusCode::MOVED_PERMANENTLY);
         Ok(())
     }
 }

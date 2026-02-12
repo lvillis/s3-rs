@@ -49,11 +49,11 @@ pub(crate) async fn assume_role_async(
     )?;
 
     let client = sts_async_client(Duration::from_secs(10), tls_root_store)?;
-    let (status, text) =
+    let (status, headers, text) =
         send_form_async(&client, resolved.url.as_str(), headers, body_bytes).await?;
 
     if !status.is_success() {
-        return Err(sts_api_error(status, &text));
+        return Err(sts_api_error(status, &headers, &text));
     }
 
     parse_assume_role_response(&text)
@@ -99,10 +99,11 @@ pub(crate) fn assume_role_blocking(
     )?;
 
     let client = sts_blocking_client(Duration::from_secs(10), tls_root_store)?;
-    let (status, text) = send_form_blocking(&client, resolved.url.as_str(), headers, body_bytes)?;
+    let (status, headers, text) =
+        send_form_blocking(&client, resolved.url.as_str(), headers, body_bytes)?;
 
     if !status.is_success() {
-        return Err(sts_api_error(status, &text));
+        return Err(sts_api_error(status, &headers, &text));
     }
 
     parse_assume_role_response(&text)
@@ -135,10 +136,11 @@ pub(crate) async fn assume_role_with_web_identity_env_async(
     );
 
     let client = sts_async_client(Duration::from_secs(10), tls_root_store)?;
-    let (status, text) = send_form_async(&client, endpoint.as_str(), headers, body_bytes).await?;
+    let (status, headers, text) =
+        send_form_async(&client, endpoint.as_str(), headers, body_bytes).await?;
 
     if !status.is_success() {
-        return Err(sts_api_error(status, &text));
+        return Err(sts_api_error(status, &headers, &text));
     }
 
     parse_assume_role_with_web_identity_response(&text)
@@ -167,7 +169,7 @@ pub(crate) fn assume_role_with_web_identity_env_blocking(
     );
 
     let client = sts_blocking_client(Duration::from_secs(10), tls_root_store)?;
-    let (status, text) = send_form_blocking(
+    let (status, headers, text) = send_form_blocking(
         &client,
         "https://sts.amazonaws.com/",
         headers,
@@ -175,7 +177,7 @@ pub(crate) fn assume_role_with_web_identity_env_blocking(
     )?;
 
     if !status.is_success() {
-        return Err(sts_api_error(status, &text));
+        return Err(sts_api_error(status, &headers, &text));
     }
 
     parse_assume_role_with_web_identity_response(&text)
@@ -187,10 +189,11 @@ async fn send_form_async(
     url: &str,
     headers: HeaderMap,
     body: Bytes,
-) -> Result<(StatusCode, String), Error> {
+) -> Result<(StatusCode, HeaderMap, String), Error> {
     let mut req = client
         .request(Method::POST, url.to_string())
         .body_bytes(body)
+        .redirect_policy(reqx::RedirectPolicy::none())
         .retry_policy(reqx::RetryPolicy::disabled());
     for (name, value) in headers {
         if let Some(name) = name {
@@ -199,11 +202,13 @@ async fn send_form_async(
     }
 
     let resp = req
+        .status_policy(reqx::StatusPolicy::Response)
         .send()
         .await
-        .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?;
+        .map_err(|e| crate::transport::map_reqx_error("request failed", e))?;
     Ok((
         resp.status(),
+        resp.headers().clone(),
         String::from_utf8_lossy(resp.body()).to_string(),
     ))
 }
@@ -214,10 +219,11 @@ fn send_form_blocking(
     url: &str,
     headers: HeaderMap,
     body: Bytes,
-) -> Result<(StatusCode, String), Error> {
+) -> Result<(StatusCode, HeaderMap, String), Error> {
     let mut req = client
         .request(Method::POST, url.to_string())
         .body_bytes(body)
+        .redirect_policy(reqx::RedirectPolicy::none())
         .retry_policy(reqx::RetryPolicy::disabled());
     for (name, value) in headers {
         if let Some(name) = name {
@@ -226,10 +232,12 @@ fn send_form_blocking(
     }
 
     let resp = req
+        .status_policy(reqx::StatusPolicy::Response)
         .send()
-        .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?;
+        .map_err(|e| crate::transport::map_reqx_error("request failed", e))?;
     Ok((
         resp.status(),
+        resp.headers().clone(),
         String::from_utf8_lossy(resp.body()).to_string(),
     ))
 }
@@ -270,27 +278,8 @@ fn form_body(params: &[(&str, &str)]) -> String {
     out
 }
 
-fn sts_api_error(status: StatusCode, body: &str) -> Error {
-    let snippet = crate::util::text::truncate_snippet(body, 4096);
-    if let Some(parsed) = crate::util::xml::parse_error_xml(body) {
-        return Error::Api {
-            status,
-            code: parsed.code,
-            message: parsed.message,
-            request_id: parsed.request_id,
-            host_id: parsed.host_id,
-            body_snippet: Some(snippet),
-        };
-    }
-
-    Error::Api {
-        status,
-        code: None,
-        message: None,
-        request_id: None,
-        host_id: None,
-        body_snippet: Some(snippet),
-    }
+fn sts_api_error(status: StatusCode, headers: &HeaderMap, body: &str) -> Error {
+    crate::transport::response_error_from_status(status, headers, body)
 }
 
 fn parse_expiration(value: &str) -> Result<OffsetDateTime, Error> {
@@ -388,6 +377,8 @@ fn sts_async_client(
     reqx::Client::builder("http://localhost")
         .request_timeout(timeout)
         .retry_policy(reqx::RetryPolicy::disabled())
+        .redirect_policy(reqx::RedirectPolicy::none())
+        .default_status_policy(reqx::StatusPolicy::Response)
         .max_response_body_bytes(4 * 1024 * 1024)
         .tls_backend(default_tls_backend())
         .tls_root_store(tls_root_store)
@@ -404,6 +395,8 @@ fn sts_blocking_client(
     reqx::blocking::Client::builder("http://localhost")
         .request_timeout(timeout)
         .retry_policy(reqx::RetryPolicy::disabled())
+        .redirect_policy(reqx::RedirectPolicy::none())
+        .default_status_policy(reqx::StatusPolicy::Response)
         .max_response_body_bytes(4 * 1024 * 1024)
         .tls_backend(default_tls_backend())
         .tls_root_store(tls_root_store)
@@ -427,9 +420,72 @@ fn default_tls_backend() -> reqx::TlsBackend {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{ErrorKind, Read, Write};
+    use std::net::{SocketAddr, TcpListener};
+    use std::thread::JoinHandle;
     use std::time::Duration;
+    use std::time::Instant;
 
     use super::*;
+
+    fn spawn_test_server(
+        response: Vec<u8>,
+    ) -> std::result::Result<(SocketAddr, JoinHandle<()>), Error> {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .map_err(|e| Error::transport("failed to bind test server", Some(Box::new(e))))?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|e| Error::transport("failed to configure test server", Some(Box::new(e))))?;
+        let addr = listener.local_addr().map_err(|e| {
+            Error::transport("failed to read test server address", Some(Box::new(e)))
+        })?;
+
+        let handle = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let _ = stream.set_nonblocking(false);
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+                        let mut request = Vec::new();
+                        let mut buf = [0u8; 1024];
+                        while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                            match stream.read(&mut buf) {
+                                Ok(0) => break,
+                                Ok(n) => {
+                                    request.extend_from_slice(&buf[..n]);
+                                    if request.len() > 64 * 1024 {
+                                        break;
+                                    }
+                                }
+                                Err(err)
+                                    if matches!(
+                                        err.kind(),
+                                        ErrorKind::WouldBlock | ErrorKind::TimedOut
+                                    ) =>
+                                {
+                                    break;
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                        let _ = stream.write_all(&response);
+                        let _ = stream.flush();
+                        break;
+                    }
+                    Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                        if Instant::now() >= deadline {
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => return,
+                }
+            }
+        });
+
+        Ok((addr, handle))
+    }
 
     #[cfg(all(feature = "async", feature = "native-tls", not(feature = "rustls")))]
     fn assert_native_tls_webpki_error(err: Error) {
@@ -522,8 +578,8 @@ mod tests {
   <HostId>host-456</HostId>
 </Error>
 "#;
-
-        let err = sts_api_error(StatusCode::FORBIDDEN, err_xml);
+        let headers = HeaderMap::new();
+        let err = sts_api_error(StatusCode::FORBIDDEN, &headers, err_xml);
         match err {
             Error::Api {
                 status,
@@ -544,11 +600,57 @@ mod tests {
         }
     }
 
+    #[test]
+    fn sts_api_error_maps_rate_limited() {
+        let mut headers = HeaderMap::new();
+        headers.insert(http::header::RETRY_AFTER, HeaderValue::from_static("2"));
+        headers.insert("x-amz-request-id", HeaderValue::from_static("req-1"));
+
+        let err = sts_api_error(StatusCode::TOO_MANY_REQUESTS, &headers, "slow down");
+        match err {
+            Error::RateLimited {
+                retry_after,
+                request_id,
+            } => {
+                assert_eq!(retry_after, Some(Duration::from_secs(2)));
+                assert_eq!(request_id.as_deref(), Some("req-1"));
+            }
+            other => panic!("expected rate-limited error, got {other:?}"),
+        }
+    }
+
     #[cfg(feature = "async")]
     #[test]
     fn sts_async_client_accepts_backend_default() {
         let client = sts_async_client(Duration::from_secs(1), reqx::TlsRootStore::BackendDefault);
-        assert!(client.is_ok(), "async STS client should build");
+        let client = client.expect("async STS client should build");
+        assert_eq!(client.default_status_policy(), reqx::StatusPolicy::Response);
+    }
+
+    #[cfg(feature = "async")]
+    #[tokio::test]
+    async fn send_form_async_non_success_returns_status_response() -> std::result::Result<(), Error>
+    {
+        let (addr, handle) = spawn_test_server(
+            b"HTTP/1.1 403 Forbidden\r\nx-amz-request-id: req-1\r\nContent-Length: 13\r\nConnection: close\r\n\r\nAccess Denied!".to_vec(),
+        )?;
+        let client = sts_async_client(Duration::from_secs(2), reqx::TlsRootStore::BackendDefault)?;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/x-www-form-urlencoded"),
+        );
+
+        let url = format!("http://{addr}/");
+        let (status, _, body) =
+            send_form_async(&client, &url, headers, Bytes::from("Action=AssumeRole")).await?;
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(body.contains("Access Denied"));
+        Ok(())
     }
 
     #[cfg(all(feature = "async", feature = "rustls"))]
@@ -573,7 +675,34 @@ mod tests {
     fn sts_blocking_client_accepts_backend_default() {
         let client =
             sts_blocking_client(Duration::from_secs(1), reqx::TlsRootStore::BackendDefault);
-        assert!(client.is_ok(), "blocking STS client should build");
+        let client = client.expect("blocking STS client should build");
+        assert_eq!(client.default_status_policy(), reqx::StatusPolicy::Response);
+    }
+
+    #[cfg(feature = "blocking")]
+    #[test]
+    fn send_form_blocking_non_success_returns_status_response() -> std::result::Result<(), Error> {
+        let (addr, handle) = spawn_test_server(
+            b"HTTP/1.1 403 Forbidden\r\nx-amz-request-id: req-1\r\nContent-Length: 13\r\nConnection: close\r\n\r\nAccess Denied!".to_vec(),
+        )?;
+        let client =
+            sts_blocking_client(Duration::from_secs(2), reqx::TlsRootStore::BackendDefault)?;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/x-www-form-urlencoded"),
+        );
+
+        let url = format!("http://{addr}/");
+        let (status, _, body) =
+            send_form_blocking(&client, &url, headers, Bytes::from("Action=AssumeRole"))?;
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(body.contains("Access Denied"));
+        Ok(())
     }
 
     #[cfg(all(feature = "blocking", feature = "rustls"))]

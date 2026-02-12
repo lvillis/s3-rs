@@ -16,6 +16,8 @@ use crate::{
     },
 };
 
+const MAX_ERROR_RESPONSE_BODY_BYTES: usize = 256 * 1024;
+
 #[cfg(feature = "multipart")]
 use crate::types::{
     AbortMultipartUploadOutput, CompleteMultipartUploadOutput, CompletedPart,
@@ -411,7 +413,7 @@ impl GetObjectRequest {
 
         if !resp.status().is_success() {
             let resp = resp
-                .into_response_limited(usize::MAX)
+                .into_response_limited(MAX_ERROR_RESPONSE_BODY_BYTES)
                 .await
                 .map_err(|e| Error::transport("failed to read response body", Some(Box::new(e))))?;
             return Err(response_error(

@@ -58,12 +58,30 @@ fn request_id_from_headers(headers: &http::HeaderMap) -> Option<String> {
 }
 
 #[cfg(any(feature = "async", feature = "blocking"))]
-fn retry_after_from_headers(headers: &http::HeaderMap) -> Option<Duration> {
+pub(crate) fn retry_after_from_headers(headers: &http::HeaderMap) -> Option<Duration> {
     headers
         .get(http::header::RETRY_AFTER)
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
-        .map(Duration::from_secs)
+        .and_then(parse_retry_after_value)
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn parse_retry_after_value(value: &str) -> Option<Duration> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+
+    let when = httpdate::parse_http_date(value).ok()?;
+    let now = std::time::SystemTime::now();
+    match when.duration_since(now) {
+        Ok(delay) => Some(delay),
+        Err(_) => Some(Duration::from_secs(0)),
+    }
 }
 
 #[cfg(any(feature = "async", feature = "blocking"))]
@@ -191,6 +209,86 @@ mod tests {
                 assert_eq!(request_id.as_deref(), Some("req-123"));
             }
             other => panic!("expected Api error, got {other:?}"),
+        }
+    }
+
+    #[cfg(any(feature = "async", feature = "blocking"))]
+    #[test]
+    fn retry_after_from_headers_supports_http_date() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            http::header::RETRY_AFTER,
+            http::HeaderValue::from_static("Sun, 06 Nov 1994 08:49:37 GMT"),
+        );
+
+        assert_eq!(
+            retry_after_from_headers(&headers),
+            Some(Duration::from_secs(0))
+        );
+    }
+
+    #[cfg(any(feature = "async", feature = "blocking"))]
+    #[test]
+    fn retry_after_from_headers_supports_seconds() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            http::header::RETRY_AFTER,
+            http::HeaderValue::from_static("7"),
+        );
+
+        assert_eq!(
+            retry_after_from_headers(&headers),
+            Some(Duration::from_secs(7))
+        );
+    }
+
+    #[cfg(any(feature = "async", feature = "blocking"))]
+    #[test]
+    fn response_error_from_status_maps_common_status_matrix() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            "x-amz-request-id",
+            http::HeaderValue::from_static("req-matrix"),
+        );
+
+        let api_statuses = [
+            http::StatusCode::BAD_REQUEST,
+            http::StatusCode::FORBIDDEN,
+            http::StatusCode::NOT_FOUND,
+            http::StatusCode::CONFLICT,
+            http::StatusCode::PRECONDITION_FAILED,
+            http::StatusCode::INTERNAL_SERVER_ERROR,
+            http::StatusCode::SERVICE_UNAVAILABLE,
+        ];
+
+        for status in api_statuses {
+            match response_error_from_status(status, &headers, "plain error body") {
+                crate::error::Error::Api {
+                    status: got_status,
+                    request_id,
+                    ..
+                } => {
+                    assert_eq!(got_status, status);
+                    assert_eq!(request_id.as_deref(), Some("req-matrix"));
+                }
+                other => panic!("expected Api for {status}, got {other:?}"),
+            }
+        }
+
+        headers.insert(
+            http::header::RETRY_AFTER,
+            http::HeaderValue::from_static("3"),
+        );
+        match response_error_from_status(http::StatusCode::TOO_MANY_REQUESTS, &headers, "throttled")
+        {
+            crate::error::Error::RateLimited {
+                retry_after,
+                request_id,
+            } => {
+                assert_eq!(retry_after, Some(Duration::from_secs(3)));
+                assert_eq!(request_id.as_deref(), Some("req-matrix"));
+            }
+            other => panic!("expected RateLimited for 429, got {other:?}"),
         }
     }
 

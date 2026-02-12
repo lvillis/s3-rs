@@ -116,7 +116,9 @@ async fn http_get_text(
     url: &str,
     headers: http::HeaderMap,
 ) -> Result<String, Error> {
-    let mut req = client.request(http::Method::GET, url.to_string());
+    let mut req = client
+        .request(http::Method::GET, url.to_string())
+        .redirect_policy(reqx::RedirectPolicy::none());
     for (name, value) in headers {
         if let Some(name) = name {
             req = req.header(name, value);
@@ -124,22 +126,20 @@ async fn http_get_text(
     }
 
     let resp = req
+        .status_policy(reqx::StatusPolicy::Response)
         .send()
         .await
-        .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?;
+        .map_err(|e| crate::transport::map_reqx_error("request failed", e))?;
     let status = resp.status();
     let body = String::from_utf8_lossy(resp.body()).to_string();
     if status.is_success() {
         return Ok(body);
     }
-    Err(Error::Api {
+    Err(crate::transport::response_error_from_status(
         status,
-        code: None,
-        message: None,
-        request_id: None,
-        host_id: None,
-        body_snippet: Some(body),
-    })
+        resp.headers(),
+        &body,
+    ))
 }
 
 #[cfg(feature = "async")]
@@ -149,26 +149,25 @@ async fn fetch_imds_v2_token(client: &reqx::Client) -> Result<String, Error> {
             http::Method::PUT,
             "http://169.254.169.254/latest/api/token".to_string(),
         )
+        .redirect_policy(reqx::RedirectPolicy::none())
         .header(
             http::header::HeaderName::from_static("x-aws-ec2-metadata-token-ttl-seconds"),
             http::HeaderValue::from_static("21600"),
         )
+        .status_policy(reqx::StatusPolicy::Response)
         .send()
         .await
-        .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?;
+        .map_err(|e| crate::transport::map_reqx_error("request failed", e))?;
     let status = resp.status();
     let body = String::from_utf8_lossy(resp.body()).to_string();
     if status.is_success() {
         return Ok(body.trim().to_string());
     }
-    Err(Error::Api {
+    Err(crate::transport::response_error_from_status(
         status,
-        code: None,
-        message: None,
-        request_id: None,
-        host_id: None,
-        body_snippet: Some(body),
-    })
+        resp.headers(),
+        &body,
+    ))
 }
 
 #[cfg(feature = "async")]
@@ -262,14 +261,17 @@ fn http_get_text_blocking(
     url: &str,
     headers: &http::HeaderMap,
 ) -> Result<String, Error> {
-    let mut req = client.request(http::Method::GET, url.to_string());
+    let mut req = client
+        .request(http::Method::GET, url.to_string())
+        .redirect_policy(reqx::RedirectPolicy::none());
     for (name, value) in headers {
         req = req.header(name.clone(), value.clone());
     }
 
     let resp = req
+        .status_policy(reqx::StatusPolicy::Response)
         .send()
-        .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?;
+        .map_err(|e| crate::transport::map_reqx_error("request failed", e))?;
     let status = resp.status();
     let out = String::from_utf8_lossy(resp.body()).to_string();
 
@@ -277,14 +279,11 @@ fn http_get_text_blocking(
         return Ok(out);
     }
 
-    Err(Error::Api {
+    Err(crate::transport::response_error_from_status(
         status,
-        code: None,
-        message: None,
-        request_id: None,
-        host_id: None,
-        body_snippet: Some(out),
-    })
+        resp.headers(),
+        &out,
+    ))
 }
 
 #[cfg(feature = "blocking")]
@@ -294,12 +293,14 @@ fn fetch_imds_v2_token_blocking(client: &reqx::blocking::Client) -> Result<Strin
             http::Method::PUT,
             "http://169.254.169.254/latest/api/token".to_string(),
         )
+        .redirect_policy(reqx::RedirectPolicy::none())
         .header(
             http::header::HeaderName::from_static("x-aws-ec2-metadata-token-ttl-seconds"),
             http::HeaderValue::from_static("21600"),
         )
+        .status_policy(reqx::StatusPolicy::Response)
         .send()
-        .map_err(|e| Error::transport("request failed", Some(Box::new(e))))?;
+        .map_err(|e| crate::transport::map_reqx_error("request failed", e))?;
 
     let status = resp.status();
     let out = String::from_utf8_lossy(resp.body()).to_string();
@@ -308,14 +309,11 @@ fn fetch_imds_v2_token_blocking(client: &reqx::blocking::Client) -> Result<Strin
         return Ok(out.trim().to_string());
     }
 
-    Err(Error::Api {
+    Err(crate::transport::response_error_from_status(
         status,
-        code: None,
-        message: None,
-        request_id: None,
-        host_id: None,
-        body_snippet: Some(out),
-    })
+        resp.headers(),
+        &out,
+    ))
 }
 
 #[cfg(feature = "blocking")]
@@ -347,6 +345,8 @@ fn metadata_async_client(
     reqx::Client::builder("http://localhost")
         .request_timeout(timeout)
         .retry_policy(reqx::RetryPolicy::disabled())
+        .redirect_policy(reqx::RedirectPolicy::none())
+        .default_status_policy(reqx::StatusPolicy::Response)
         .max_response_body_bytes(1024 * 1024)
         .tls_backend(default_tls_backend())
         .tls_root_store(tls_root_store)
@@ -363,6 +363,8 @@ fn metadata_blocking_client(
     reqx::blocking::Client::builder("http://localhost")
         .request_timeout(timeout)
         .retry_policy(reqx::RetryPolicy::disabled())
+        .redirect_policy(reqx::RedirectPolicy::none())
+        .default_status_policy(reqx::StatusPolicy::Response)
         .max_response_body_bytes(1024 * 1024)
         .tls_backend(default_tls_backend())
         .tls_root_store(tls_root_store)
@@ -386,9 +388,72 @@ fn default_tls_backend() -> reqx::TlsBackend {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{ErrorKind, Read, Write};
+    use std::net::{SocketAddr, TcpListener};
+    use std::thread::JoinHandle;
     use std::time::Duration;
+    use std::time::Instant;
 
     use super::*;
+
+    fn spawn_test_server(
+        response: Vec<u8>,
+    ) -> std::result::Result<(SocketAddr, JoinHandle<()>), Error> {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .map_err(|e| Error::transport("failed to bind test server", Some(Box::new(e))))?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|e| Error::transport("failed to configure test server", Some(Box::new(e))))?;
+        let addr = listener.local_addr().map_err(|e| {
+            Error::transport("failed to read test server address", Some(Box::new(e)))
+        })?;
+
+        let handle = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let _ = stream.set_nonblocking(false);
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+                        let mut request = Vec::new();
+                        let mut buf = [0u8; 1024];
+                        while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                            match stream.read(&mut buf) {
+                                Ok(0) => break,
+                                Ok(n) => {
+                                    request.extend_from_slice(&buf[..n]);
+                                    if request.len() > 64 * 1024 {
+                                        break;
+                                    }
+                                }
+                                Err(err)
+                                    if matches!(
+                                        err.kind(),
+                                        ErrorKind::WouldBlock | ErrorKind::TimedOut
+                                    ) =>
+                                {
+                                    break;
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                        let _ = stream.write_all(&response);
+                        let _ = stream.flush();
+                        break;
+                    }
+                    Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                        if Instant::now() >= deadline {
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => return,
+                }
+            }
+        });
+
+        Ok((addr, handle))
+    }
 
     #[cfg(all(feature = "async", feature = "native-tls", not(feature = "rustls")))]
     fn assert_native_tls_webpki_error(err: Error) {
@@ -452,7 +517,39 @@ mod tests {
     fn metadata_async_client_accepts_backend_default() {
         let client =
             metadata_async_client(Duration::from_secs(1), reqx::TlsRootStore::BackendDefault);
-        assert!(client.is_ok(), "async metadata client should build");
+        let client = client.expect("async metadata client should build");
+        assert_eq!(client.default_status_policy(), reqx::StatusPolicy::Response);
+    }
+
+    #[cfg(feature = "async")]
+    #[tokio::test]
+    async fn http_get_text_maps_429_to_rate_limited_async() -> std::result::Result<(), Error> {
+        let (addr, handle) = spawn_test_server(
+            b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 3\r\nx-amz-request-id: req-1\r\nContent-Length: 4\r\nConnection: close\r\n\r\nslow".to_vec(),
+        )?;
+        let client =
+            metadata_async_client(Duration::from_secs(2), reqx::TlsRootStore::BackendDefault)?;
+        let url = format!("http://{addr}/");
+
+        let err = http_get_text(&client, &url, http::HeaderMap::new())
+            .await
+            .expect_err("expected non-success IMDS response to be mapped");
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+
+        match err {
+            Error::RateLimited {
+                retry_after,
+                request_id,
+            } => {
+                assert_eq!(retry_after, Some(Duration::from_secs(3)));
+                assert_eq!(request_id.as_deref(), Some("req-1"));
+            }
+            other => panic!("expected rate-limited error, got {other:?}"),
+        }
+
+        Ok(())
     }
 
     #[cfg(all(feature = "async", feature = "rustls"))]
@@ -477,7 +574,38 @@ mod tests {
     fn metadata_blocking_client_accepts_backend_default() {
         let client =
             metadata_blocking_client(Duration::from_secs(1), reqx::TlsRootStore::BackendDefault);
-        assert!(client.is_ok(), "blocking metadata client should build");
+        let client = client.expect("blocking metadata client should build");
+        assert_eq!(client.default_status_policy(), reqx::StatusPolicy::Response);
+    }
+
+    #[cfg(feature = "blocking")]
+    #[test]
+    fn http_get_text_blocking_maps_429_to_rate_limited() -> std::result::Result<(), Error> {
+        let (addr, handle) = spawn_test_server(
+            b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 3\r\nx-amz-request-id: req-1\r\nContent-Length: 4\r\nConnection: close\r\n\r\nslow".to_vec(),
+        )?;
+        let client =
+            metadata_blocking_client(Duration::from_secs(2), reqx::TlsRootStore::BackendDefault)?;
+        let url = format!("http://{addr}/");
+
+        let err = http_get_text_blocking(&client, &url, &http::HeaderMap::new())
+            .expect_err("expected non-success IMDS response to be mapped");
+        handle
+            .join()
+            .map_err(|_| Error::transport("test server thread panicked", None))?;
+
+        match err {
+            Error::RateLimited {
+                retry_after,
+                request_id,
+            } => {
+                assert_eq!(retry_after, Some(Duration::from_secs(3)));
+                assert_eq!(request_id.as_deref(), Some("req-1"));
+            }
+            other => panic!("expected rate-limited error, got {other:?}"),
+        }
+
+        Ok(())
     }
 
     #[cfg(all(feature = "blocking", feature = "rustls"))]
