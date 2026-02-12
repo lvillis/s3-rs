@@ -422,8 +422,12 @@ mod tests {
     #[test]
     fn response_service_error_ignores_non_error_success_body() {
         assert!(
-            response_service_error(http::StatusCode::OK, &http::HeaderMap::new(), "<ListBucketResult/>")
-                .is_none()
+            response_service_error(
+                http::StatusCode::OK,
+                &http::HeaderMap::new(),
+                "<ListBucketResult/>"
+            )
+            .is_none()
         );
     }
 
@@ -431,8 +435,9 @@ mod tests {
     #[test]
     fn response_service_error_preserves_retryable_service_code_on_4xx() {
         let body = r#"<Error><Code>SlowDown</Code><Message>slow down</Message></Error>"#;
-        let err = response_service_error(http::StatusCode::BAD_REQUEST, &http::HeaderMap::new(), body)
-            .expect("expected embedded service error");
+        let err =
+            response_service_error(http::StatusCode::BAD_REQUEST, &http::HeaderMap::new(), body)
+                .expect("expected embedded service error");
         assert!(err.is_retryable());
     }
 

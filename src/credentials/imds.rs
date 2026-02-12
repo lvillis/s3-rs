@@ -709,10 +709,9 @@ mod tests {
             assert!(!should_fallback_to_imds_v1_from_token_error(&err));
         }
 
-        assert!(!should_fallback_to_imds_v1_from_token_error(&Error::transport(
-            "network timeout",
-            None,
-        )));
+        assert!(!should_fallback_to_imds_v1_from_token_error(
+            &Error::transport("network timeout", None,)
+        ));
     }
 
     #[cfg(feature = "async")]

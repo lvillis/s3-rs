@@ -3,8 +3,8 @@
 use bytes::Bytes;
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
 
-use super::common::create_bucket_location_constraint;
 use super::blocking_common::read_body_string;
+use super::common::create_bucket_location_constraint;
 
 use crate::{
     client::BlockingClient,

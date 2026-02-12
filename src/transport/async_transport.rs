@@ -282,9 +282,11 @@ impl AsyncTransport {
                                     return Err(map_reqx_error("request failed", err));
                                 }
                             };
-                            if let Some(err) =
-                                response_service_error(resp.status(), resp.headers(), &resp.text_lossy())
-                            {
+                            if let Some(err) = response_service_error(
+                                resp.status(),
+                                resp.headers(),
+                                &resp.text_lossy(),
+                            ) {
                                 if attempt < max_attempts && err.is_retryable() {
                                     #[cfg(feature = "metrics")]
                                     metrics::counter!(
