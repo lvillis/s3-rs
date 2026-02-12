@@ -1,3 +1,18 @@
+## [0.1.12] - 2026-02-12
+
+### 🐛 Bug Fixes
+
+- *(store)* Align reqx transport semantics and add regression tests
+- *(store)* Harden reqx retries, XML error parsing and IMDS fallback
+
+### ⚙️ Miscellaneous Tasks
+
+- Update Cargo.toml
+## [0.1.11] - 2026-02-11
+
+### ⚙️ Miscellaneous Tasks
+
+- Release s3 version 0.1.11
 ## [0.1.10] - 2026-02-11
 
 ### 🐛 Bug Fixes
