@@ -1,3 +1,12 @@
+## [0.1.13] - 2026-02-12
+
+### 🐛 Bug Fixes
+
+- *(store)* Avoid false redirect errors when query is omitted
+
+### ⚙️ Miscellaneous Tasks
+
+- Fmt
 ## [0.1.12] - 2026-02-12
 
 ### 🐛 Bug Fixes
@@ -8,6 +17,7 @@
 ### ⚙️ Miscellaneous Tasks
 
 - Update Cargo.toml
+- Release s3 version 0.1.12
 ## [0.1.11] - 2026-02-11
 
 ### ⚙️ Miscellaneous Tasks
