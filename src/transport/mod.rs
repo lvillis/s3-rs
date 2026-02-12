@@ -207,7 +207,6 @@ pub(crate) fn followed_redirect(request_url: &Url, response_uri: &str) -> bool {
         || request_url.host_str() != response_url.host_str()
         || request_url.port_or_known_default() != response_url.port_or_known_default()
         || request_url.path() != response_url.path()
-        || request_url.query() != response_url.query()
 }
 
 #[cfg(any(feature = "async", feature = "blocking"))]
@@ -373,6 +372,23 @@ mod tests {
             }
             other => panic!("expected RateLimited for 429, got {other:?}"),
         }
+    }
+
+    #[cfg(any(feature = "async", feature = "blocking"))]
+    #[test]
+    fn followed_redirect_ignores_query_loss_when_authority_and_path_match() {
+        let request_url =
+            Url::parse("http://127.0.0.1:9000/demo-bucket?list-type=2&max-keys=1").unwrap();
+        let response_uri = "http://127.0.0.1:9000/demo-bucket";
+        assert!(!followed_redirect(&request_url, response_uri));
+    }
+
+    #[cfg(any(feature = "async", feature = "blocking"))]
+    #[test]
+    fn followed_redirect_still_flags_path_change() {
+        let request_url = Url::parse("http://127.0.0.1:9000/demo-bucket?uploads=").unwrap();
+        let response_uri = "http://127.0.0.1:9000/other-bucket";
+        assert!(followed_redirect(&request_url, response_uri));
     }
 
     #[cfg(any(feature = "async", feature = "blocking"))]
