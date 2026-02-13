@@ -1,3 +1,8 @@
+## [0.1.15] - 2026-02-13
+
+### 🐛 Bug Fixes
+
+- *(infra)* Dedupe CI runs and resolve clippy warnings
 ## [0.1.14] - 2026-02-13
 
 ### 🐛 Bug Fixes
@@ -10,6 +15,10 @@
 - *(store)* Harden retry/trace redaction and rate-limit error mapping
 - *(store)* Tighten host redaction, service error metrics, and async presign guidance
 - *(store)* Reject endpoint userinfo and redact s3.request host
+
+### ⚙️ Miscellaneous Tasks
+
+- Release s3 version 0.1.14
 ## [0.1.13] - 2026-02-12
 
 ### 🐛 Bug Fixes
