@@ -15,8 +15,8 @@ use crate::{
     error::{Error, Result},
     transport::{
         RetryConfig, backoff_delay, default_tls_backend, default_user_agent, followed_redirect,
-        is_retryable_method, map_reqx_error, response_error_from_status, response_service_error,
-        retry_delay_from_response, should_retry_error, should_retry_status,
+        is_retryable_method, map_reqx_error, redacted_request_context, response_error_from_status,
+        response_service_error, retry_delay_from_response, should_retry_error, should_retry_status,
         unexpected_redirect_error,
     },
 };
@@ -184,7 +184,10 @@ impl BlockingTransport {
                     .increment(1);
 
                     return Err(map_reqx_error(
-                        &format!("request failed: {}", request_context(&method, &url)),
+                        &format!(
+                            "request failed: {}",
+                            redacted_request_context(&method, &url)
+                        ),
                         err,
                     ));
                 }
@@ -285,7 +288,7 @@ impl BlockingTransport {
         Err(Error::transport(
             format!(
                 "request failed after retries: {}",
-                request_context(&method, &url)
+                redacted_request_context(&method, &url)
             ),
             None,
         ))
@@ -335,7 +338,10 @@ impl BlockingTransport {
                         continue;
                     }
                     return Err(map_reqx_error(
-                        &format!("request failed: {}", request_context(&method, &url)),
+                        &format!(
+                            "request failed: {}",
+                            redacted_request_context(&method, &url)
+                        ),
                         err,
                     ));
                 }
@@ -345,7 +351,7 @@ impl BlockingTransport {
         Err(Error::transport(
             format!(
                 "request failed after retries: {}",
-                request_context(&method, &url)
+                redacted_request_context(&method, &url)
             ),
             None,
         ))
@@ -387,20 +393,6 @@ impl BlockingTransport {
 
 pub(crate) fn response_error(status: StatusCode, headers: &http::HeaderMap, body: &str) -> Error {
     response_error_from_status(status, headers, body)
-}
-
-fn request_context(method: &Method, url: &Url) -> String {
-    let authority = match (url.host_str(), url.port()) {
-        (Some(host), Some(port)) => format!("{host}:{port}"),
-        (Some(host), None) => host.to_string(),
-        (None, _) => String::new(),
-    };
-
-    if authority.is_empty() {
-        format!("{method} {}", url.path())
-    } else {
-        format!("{method} {authority}{}", url.path())
-    }
 }
 
 fn ensure_empty_body(body: &BlockingBody) -> Result<()> {
@@ -577,6 +569,37 @@ mod tests {
     }
 
     #[test]
+    fn send_transport_error_redacts_request_path() -> Result<()> {
+        let retry = RetryConfig {
+            max_attempts: 1,
+            ..RetryConfig::default()
+        };
+        let transport = BlockingTransport::new(
+            retry,
+            None,
+            Some(Duration::from_millis(100)),
+            reqx::TlsRootStore::System,
+        )?;
+        let url = Url::parse("http://127.0.0.1:1/private/object/key?token=secret")
+            .map_err(|_| Error::invalid_config("invalid test URL"))?;
+
+        let err = match transport.send(Method::GET, url, HeaderMap::new(), BlockingBody::Empty) {
+            Ok(_) => panic!("request should fail with transport error"),
+            Err(err) => err,
+        };
+
+        match err {
+            Error::Transport { message, .. } => {
+                assert!(message.contains("http://127.0.0.1:1/<redacted>?<redacted>"));
+                assert!(!message.contains("private/object/key"));
+                assert!(!message.contains("token=secret"));
+            }
+            other => panic!("expected transport error, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[test]
     fn send_head_with_content_encoding_and_empty_body_returns_ok() -> Result<()> {
         let (addr, handle, hits) = spawn_test_server(vec![
             b"HTTP/1.1 200 OK\r\nContent-Encoding: zstd\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
@@ -624,6 +647,7 @@ mod tests {
             max_attempts: 3,
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_millis(0),
+            max_retry_after: Duration::from_secs(30),
         };
         let transport = BlockingTransport::new(
             retry,
@@ -656,6 +680,7 @@ mod tests {
             max_attempts: 2,
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_millis(0),
+            max_retry_after: Duration::from_secs(30),
         };
         let transport = BlockingTransport::new(
             retry,
@@ -688,6 +713,7 @@ mod tests {
             max_attempts: 2,
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_millis(0),
+            max_retry_after: Duration::from_secs(30),
         };
         let transport = BlockingTransport::new(
             retry,
@@ -724,6 +750,7 @@ mod tests {
             max_attempts: 2,
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_millis(0),
+            max_retry_after: Duration::from_secs(30),
         };
         let transport = BlockingTransport::new(
             retry,
@@ -755,6 +782,7 @@ mod tests {
             max_attempts: 2,
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_millis(0),
+            max_retry_after: Duration::from_secs(30),
         };
         let transport = BlockingTransport::new(
             retry,
@@ -794,6 +822,7 @@ mod tests {
             max_attempts: 2,
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_millis(0),
+            max_retry_after: Duration::from_secs(30),
         };
         let transport = BlockingTransport::new(
             retry,
@@ -832,6 +861,7 @@ mod tests {
             max_attempts: 2,
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_millis(0),
+            max_retry_after: Duration::from_secs(30),
         };
         let transport = BlockingTransport::new(
             retry,

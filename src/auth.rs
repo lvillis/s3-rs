@@ -231,6 +231,10 @@ pub struct CachedProvider<P> {
     condvar: Condvar,
     #[cfg(feature = "async")]
     notify: tokio::sync::Notify,
+    #[cfg(all(feature = "blocking", feature = "async"))]
+    refresh_epoch: std::sync::Mutex<u64>,
+    #[cfg(all(feature = "blocking", feature = "async"))]
+    refresh_condvar: std::sync::Condvar,
 }
 
 impl<P> CachedProvider<P>
@@ -252,6 +256,10 @@ where
             condvar: Condvar::new(),
             #[cfg(feature = "async")]
             notify: tokio::sync::Notify::new(),
+            #[cfg(all(feature = "blocking", feature = "async"))]
+            refresh_epoch: std::sync::Mutex::new(0),
+            #[cfg(all(feature = "blocking", feature = "async"))]
+            refresh_condvar: std::sync::Condvar::new(),
         }
     }
 
@@ -347,6 +355,38 @@ where
         )
     }
 
+    #[cfg(all(feature = "blocking", feature = "async"))]
+    fn observed_refresh_epoch(&self) -> u64 {
+        *self
+            .refresh_epoch
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    #[cfg(all(feature = "blocking", feature = "async"))]
+    fn wait_for_refresh_epoch_change(&self, observed_epoch: u64) {
+        let mut epoch = self
+            .refresh_epoch
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        while *epoch == observed_epoch {
+            epoch = self
+                .refresh_condvar
+                .wait(epoch)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+    }
+
+    #[cfg(all(feature = "blocking", feature = "async"))]
+    fn notify_blocking_refresh_waiters(&self) {
+        let mut epoch = self
+            .refresh_epoch
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *epoch = epoch.wrapping_add(1);
+        self.refresh_condvar.notify_all();
+    }
+
     #[cfg(all(feature = "blocking", not(feature = "async")))]
     fn get_blocking(&self, force: bool) -> Result<CredentialsSnapshot> {
         use std::time::Instant;
@@ -432,7 +472,7 @@ where
 
         loop {
             let now_utc = OffsetDateTime::now_utc();
-            let (fallback, should_refresh) = {
+            let (fallback, should_refresh, wait_epoch) = {
                 let mut state = self.state.blocking_lock();
 
                 if let Some(cached) = state.cached.as_ref() {
@@ -449,7 +489,11 @@ where
                 }
 
                 if state.refreshing {
-                    (state.cached.clone(), false)
+                    (
+                        state.cached.clone(),
+                        false,
+                        Some(self.observed_refresh_epoch()),
+                    )
                 } else {
                     let has_usable_fallback = state
                         .cached
@@ -464,12 +508,16 @@ where
                     }
                     state.refreshing = true;
                     state.last_refresh_attempt = Some(Instant::now());
-                    (state.cached.clone(), true)
+                    (state.cached.clone(), true, None)
                 }
             };
 
+            if let Some(observed_epoch) = wait_epoch {
+                self.wait_for_refresh_epoch_change(observed_epoch);
+                continue;
+            }
+
             if !should_refresh {
-                std::thread::sleep(Duration::from_millis(1));
                 continue;
             }
 
@@ -482,6 +530,7 @@ where
                     state.cached = Some(snapshot.clone());
                     drop(state);
                     self.notify.notify_waiters();
+                    self.notify_blocking_refresh_waiters();
                     return Ok(snapshot);
                 }
                 Err(err) => {
@@ -489,6 +538,7 @@ where
                     let fallback = fallback.filter(|s| !Self::is_expired(s, fallback_now));
                     drop(state);
                     self.notify.notify_waiters();
+                    self.notify_blocking_refresh_waiters();
                     if let Some(snapshot) = fallback {
                         return Ok(snapshot);
                     }
@@ -555,6 +605,8 @@ where
                     state.cached = Some(snapshot.clone());
                     drop(state);
                     self.notify.notify_waiters();
+                    #[cfg(all(feature = "blocking", feature = "async"))]
+                    self.notify_blocking_refresh_waiters();
                     return Ok(snapshot);
                 }
                 Err(err) => {
@@ -562,6 +614,8 @@ where
                     let fallback = fallback.filter(|s| !Self::is_expired(s, fallback_now));
                     drop(state);
                     self.notify.notify_waiters();
+                    #[cfg(all(feature = "blocking", feature = "async"))]
+                    self.notify_blocking_refresh_waiters();
                     if let Some(snapshot) = fallback {
                         return Ok(snapshot);
                     }

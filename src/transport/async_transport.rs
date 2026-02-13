@@ -725,6 +725,7 @@ mod tests {
             max_attempts: 2,
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_millis(0),
+            max_retry_after: Duration::from_secs(30),
         };
         let transport = AsyncTransport::new(
             retry,
@@ -757,6 +758,7 @@ mod tests {
             max_attempts: 3,
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_millis(0),
+            max_retry_after: Duration::from_secs(30),
         };
         let transport = AsyncTransport::new(
             retry,
@@ -791,6 +793,7 @@ mod tests {
             max_attempts: 2,
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_millis(0),
+            max_retry_after: Duration::from_secs(30),
         };
         let transport = AsyncTransport::new(
             retry,
@@ -825,6 +828,7 @@ mod tests {
             max_attempts: 2,
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_millis(0),
+            max_retry_after: Duration::from_secs(30),
         };
         let transport = AsyncTransport::new(
             retry,
@@ -863,6 +867,7 @@ mod tests {
             max_attempts: 2,
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_millis(0),
+            max_retry_after: Duration::from_secs(30),
         };
         let transport = AsyncTransport::new(
             retry,
@@ -896,6 +901,7 @@ mod tests {
             max_attempts: 2,
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_millis(0),
+            max_retry_after: Duration::from_secs(30),
         };
         let transport = AsyncTransport::new(
             retry,
@@ -937,6 +943,7 @@ mod tests {
             max_attempts: 2,
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_millis(0),
+            max_retry_after: Duration::from_secs(30),
         };
         let transport = AsyncTransport::new(
             retry,
@@ -977,6 +984,7 @@ mod tests {
             max_attempts: 2,
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_millis(0),
+            max_retry_after: Duration::from_secs(30),
         };
         let transport = AsyncTransport::new(
             retry,
@@ -1009,6 +1017,7 @@ mod tests {
             max_attempts: 3,
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_millis(0),
+            max_retry_after: Duration::from_secs(30),
         };
         let transport = AsyncTransport::new(
             retry,

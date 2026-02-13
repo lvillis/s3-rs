@@ -8,19 +8,21 @@ pub(crate) fn redact_value(value: &str) -> String {
         return "<redacted>".to_string();
     }
 
-    let head = value.chars().take(4).collect::<String>();
-    let tail = value
-        .chars()
-        .rev()
-        .take(4)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect::<String>();
-
-    if head.len() + tail.len() >= value.len() {
+    let chars = value.chars().collect::<Vec<_>>();
+    if chars.len() <= 12 {
         return "<redacted>".to_string();
     }
+
+    let head = chars.iter().take(2).collect::<String>();
+    let tail = chars
+        .iter()
+        .rev()
+        .take(2)
+        .copied()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
 
     format!("{head}...{tail}")
 }
@@ -48,7 +50,9 @@ mod tests {
         assert_eq!(redact_value(""), "<redacted>");
         assert_eq!(redact_value("   "), "<redacted>");
         assert_eq!(redact_value("12345678"), "<redacted>");
-        assert_eq!(redact_value("123456789"), "1234...6789");
+        assert_eq!(redact_value("123456789"), "<redacted>");
+        assert_eq!(redact_value("123456789012"), "<redacted>");
+        assert_eq!(redact_value("1234567890123"), "12...23");
     }
 
     #[test]

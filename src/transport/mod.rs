@@ -21,6 +21,7 @@ pub(crate) struct RetryConfig {
     pub(crate) max_attempts: u32,
     pub(crate) base_delay: Duration,
     pub(crate) max_delay: Duration,
+    pub(crate) max_retry_after: Duration,
 }
 
 impl Default for RetryConfig {
@@ -29,6 +30,7 @@ impl Default for RetryConfig {
             max_attempts: 3,
             base_delay: Duration::from_millis(200),
             max_delay: Duration::from_secs(2),
+            max_retry_after: Duration::from_secs(30),
         }
     }
 }
@@ -142,7 +144,7 @@ pub(crate) fn retry_after_from_headers(headers: &http::HeaderMap) -> Option<Dura
 
 #[cfg(any(feature = "async", feature = "blocking"))]
 pub(crate) fn clamp_retry_after(config: RetryConfig, retry_after: Duration) -> Duration {
-    retry_after.min(config.max_delay)
+    retry_after.min(config.max_retry_after)
 }
 
 #[cfg(any(feature = "async", feature = "blocking"))]
@@ -323,7 +325,7 @@ fn redacted_response_uri_for_error(response_uri: &str) -> String {
 }
 
 #[cfg(any(feature = "async", feature = "blocking"))]
-fn redacted_url_for_error(url: &Url) -> String {
+pub(crate) fn redacted_url_for_error(url: &Url) -> String {
     let mut out = String::new();
     out.push_str(url.scheme());
     out.push_str("://");
@@ -352,6 +354,11 @@ fn redacted_url_for_error(url: &Url) -> String {
     out
 }
 
+#[cfg(any(feature = "async", feature = "blocking"))]
+pub(crate) fn redacted_request_context(method: &Method, url: &Url) -> String {
+    format!("{method} {}", redacted_url_for_error(url))
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
@@ -364,6 +371,7 @@ mod tests {
             max_attempts: 3,
             base_delay: Duration::from_millis(200),
             max_delay: Duration::from_secs(2),
+            max_retry_after: Duration::from_secs(30),
         };
 
         let d1 = backoff_delay(cfg, 1);
@@ -383,6 +391,7 @@ mod tests {
             max_attempts: 3,
             base_delay: Duration::from_millis(0),
             max_delay: Duration::from_secs(2),
+            max_retry_after: Duration::from_secs(30),
         };
 
         assert_eq!(backoff_delay(cfg, 1), Duration::from_millis(0));
@@ -470,6 +479,7 @@ mod tests {
             max_attempts: 3,
             base_delay: Duration::from_millis(200),
             max_delay: Duration::from_secs(2),
+            max_retry_after: Duration::from_secs(30),
         };
 
         assert_eq!(
@@ -478,7 +488,11 @@ mod tests {
         );
         assert_eq!(
             clamp_retry_after(config, Duration::from_secs(30)),
-            Duration::from_secs(2)
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            clamp_retry_after(config, Duration::from_secs(60)),
+            Duration::from_secs(30)
         );
     }
 
@@ -602,6 +616,16 @@ mod tests {
             }
             other => panic!("expected transport error, got {other:?}"),
         }
+    }
+
+    #[cfg(any(feature = "async", feature = "blocking"))]
+    #[test]
+    fn redacted_request_context_hides_path_and_query() {
+        let url = Url::parse("https://example.com/private/key/path?token=secret").expect("url");
+        let ctx = redacted_request_context(&Method::GET, &url);
+        assert!(ctx.contains("GET https://example.com/<redacted>?<redacted>"));
+        assert!(!ctx.contains("private/key/path"));
+        assert!(!ctx.contains("token=secret"));
     }
 
     #[cfg(any(feature = "async", feature = "blocking"))]

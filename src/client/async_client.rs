@@ -319,6 +319,12 @@ impl ClientBuilder {
         self
     }
 
+    /// Sets the maximum delay honored from `Retry-After` hints.
+    pub fn max_retry_after(mut self, delay: Duration) -> Self {
+        self.retry.max_retry_after = delay;
+        self
+    }
+
     /// Overrides the default user agent.
     pub fn user_agent(mut self, user_agent: impl Into<String>) -> Self {
         self.user_agent = Some(user_agent.into());
