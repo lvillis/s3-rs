@@ -169,17 +169,16 @@ impl AsyncTransport {
                             resp.status(),
                             resp.headers(),
                             &resp.text_lossy(),
-                        ) {
-                            if resp.status().is_success() {
-                                #[cfg(feature = "metrics")]
-                                metrics::counter!(
-                                    "s3_http_errors_total",
-                                    "method" => method_label(&method),
-                                    "kind" => "service"
-                                )
-                                .increment(1);
-                                return Err(err);
-                            }
+                        ) && resp.status().is_success()
+                        {
+                            #[cfg(feature = "metrics")]
+                            metrics::counter!(
+                                "s3_http_errors_total",
+                                "method" => method_label(&method),
+                                "kind" => "service"
+                            )
+                            .increment(1);
+                            return Err(err);
                         }
                         #[cfg(feature = "metrics")]
                         {

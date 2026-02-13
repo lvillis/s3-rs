@@ -369,7 +369,10 @@ pub(crate) fn redacted_url_for_error(url: &Url) -> String {
     out
 }
 
-#[cfg(any(feature = "async", feature = "blocking"))]
+#[cfg(all(
+    any(feature = "async", feature = "blocking"),
+    any(feature = "blocking", test)
+))]
 pub(crate) fn redacted_request_context(method: &Method, url: &Url) -> String {
     format!("{method} {}", redacted_url_for_error(url))
 }
@@ -383,7 +386,10 @@ pub(crate) fn redacted_path_for_trace(url: &Url) -> &'static str {
     }
 }
 
-#[cfg(any(feature = "async", feature = "blocking"))]
+#[cfg(all(
+    any(feature = "async", feature = "blocking"),
+    any(feature = "tracing", test)
+))]
 pub(crate) fn redacted_host_for_trace(_url: &Url) -> &'static str {
     REDACTED_HOST
 }

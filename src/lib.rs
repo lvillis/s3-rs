@@ -46,6 +46,8 @@
 //!
 //! See README for product intent and usage.
 
+#![allow(clippy::result_large_err)]
+
 #[cfg(all(
     feature = "rustls",
     feature = "native-tls",
