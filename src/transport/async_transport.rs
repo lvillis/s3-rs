@@ -139,7 +139,7 @@ impl AsyncTransport {
                 let _guard = tracing::debug_span!(
                     "s3.http",
                     method = %method,
-                    host = url.host_str().unwrap_or(""),
+                    host = crate::transport::redacted_host_for_trace(&url),
                     path = crate::transport::redacted_path_for_trace(&url),
                     has_query = url.query().is_some(),
                     attempt = 1u32,
@@ -171,6 +171,13 @@ impl AsyncTransport {
                             &resp.text_lossy(),
                         ) {
                             if resp.status().is_success() {
+                                #[cfg(feature = "metrics")]
+                                metrics::counter!(
+                                    "s3_http_errors_total",
+                                    "method" => method_label(&method),
+                                    "kind" => "service"
+                                )
+                                .increment(1);
                                 return Err(err);
                             }
                         }
@@ -216,7 +223,7 @@ impl AsyncTransport {
                     let _guard = tracing::debug_span!(
                         "s3.http",
                         method = %method,
-                        host = url.host_str().unwrap_or(""),
+                        host = crate::transport::redacted_host_for_trace(&url),
                         path = crate::transport::redacted_path_for_trace(&url),
                         has_query = url.query().is_some(),
                         attempt,
@@ -314,6 +321,13 @@ impl AsyncTransport {
                                     continue;
                                 }
                                 if resp.status().is_success() {
+                                    #[cfg(feature = "metrics")]
+                                    metrics::counter!(
+                                        "s3_http_errors_total",
+                                        "method" => method_label(&method),
+                                        "kind" => "service"
+                                    )
+                                    .increment(1);
                                     return Err(err);
                                 }
                             }

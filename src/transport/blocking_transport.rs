@@ -143,7 +143,7 @@ impl BlockingTransport {
             let _guard = tracing::debug_span!(
                 "s3.http",
                 method = %method,
-                host = url.host_str().unwrap_or(""),
+                host = crate::transport::redacted_host_for_trace(&url),
                 path = crate::transport::redacted_path_for_trace(&url),
                 has_query = url.query().is_some(),
                 attempt,
@@ -273,6 +273,13 @@ impl BlockingTransport {
                     continue;
                 }
                 if resp.status().is_success() {
+                    #[cfg(feature = "metrics")]
+                    metrics::counter!(
+                        "s3_http_errors_total",
+                        "method" => method_label(&method),
+                        "kind" => "service"
+                    )
+                    .increment(1);
                     return Err(err);
                 }
             }
@@ -592,7 +599,8 @@ mod tests {
 
         match err {
             Error::Transport { message, .. } => {
-                assert!(message.contains("http://127.0.0.1:1/<redacted>?<redacted>"));
+                assert!(message.contains("http://<redacted-host>:1/<redacted>?<redacted>"));
+                assert!(!message.contains("127.0.0.1"));
                 assert!(!message.contains("private/object/key"));
                 assert!(!message.contains("token=secret"));
             }

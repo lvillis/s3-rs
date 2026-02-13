@@ -6,6 +6,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(any(feature = "async", feature = "blocking"))]
+const REDACTED_HOST: &str = "<redacted-host>";
+
 #[cfg(feature = "async")]
 pub(crate) mod async_transport;
 #[cfg(feature = "blocking")]
@@ -345,7 +348,7 @@ pub(crate) fn redacted_url_for_error(url: &Url) -> String {
     let mut out = String::new();
     out.push_str(url.scheme());
     out.push_str("://");
-    out.push_str(url.host_str().unwrap_or("<unknown-host>"));
+    out.push_str(REDACTED_HOST);
 
     if let Some(port) = url.port() {
         let default = match url.scheme() {
@@ -378,6 +381,11 @@ pub(crate) fn redacted_path_for_trace(url: &Url) -> &'static str {
     } else {
         "/<redacted>"
     }
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+pub(crate) fn redacted_host_for_trace(_url: &Url) -> &'static str {
+    REDACTED_HOST
 }
 
 #[cfg(test)]
@@ -640,8 +648,9 @@ mod tests {
 
         match err {
             crate::error::Error::Transport { message, .. } => {
-                assert!(message.contains("https://example.com/<redacted>?<redacted>"));
-                assert!(message.contains("-> https://example.com/<redacted>?<redacted>"));
+                assert!(message.contains("https://<redacted-host>/<redacted>?<redacted>"));
+                assert!(message.contains("-> https://<redacted-host>/<redacted>?<redacted>"));
+                assert!(!message.contains("example.com"));
                 assert!(!message.contains("/path"));
                 assert!(!message.contains("X-Amz-Credential"));
                 assert!(!message.contains("X-Amz-Signature"));
@@ -672,7 +681,8 @@ mod tests {
     fn redacted_request_context_hides_path_and_query() {
         let url = Url::parse("https://example.com/private/key/path?token=secret").expect("url");
         let ctx = redacted_request_context(&Method::GET, &url);
-        assert!(ctx.contains("GET https://example.com/<redacted>?<redacted>"));
+        assert!(ctx.contains("GET https://<redacted-host>/<redacted>?<redacted>"));
+        assert!(!ctx.contains("example.com"));
         assert!(!ctx.contains("private/key/path"));
         assert!(!ctx.contains("token=secret"));
     }
@@ -684,6 +694,13 @@ mod tests {
         let object = Url::parse("https://example.com/a/b/c?token=secret").expect("url");
         assert_eq!(redacted_path_for_trace(&root), "/");
         assert_eq!(redacted_path_for_trace(&object), "/<redacted>");
+    }
+
+    #[cfg(any(feature = "async", feature = "blocking"))]
+    #[test]
+    fn redacted_host_for_trace_hides_virtual_host_bucket() {
+        let url = Url::parse("https://bucket-with-sensitive-name.s3.example.com/key").expect("url");
+        assert_eq!(redacted_host_for_trace(&url), "<redacted-host>");
     }
 
     #[cfg(any(feature = "async", feature = "blocking"))]

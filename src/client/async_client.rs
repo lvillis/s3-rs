@@ -182,7 +182,7 @@ impl Client {
     ) -> Result<crate::types::PresignedRequest> {
         let creds = self.inner.auth.static_credentials().ok_or_else(|| {
             Error::invalid_config(
-                "presign requires static credentials; use build_async() for credential providers",
+                "presign requires static credentials; use Presign*Request::build_async for credential providers",
             )
         })?;
 
@@ -382,6 +382,25 @@ impl AsyncTlsRootStore {
 mod tests {
     use super::*;
 
+    #[derive(Debug)]
+    struct FixedProvider;
+
+    impl crate::auth::CredentialsProvider for FixedProvider {
+        #[cfg(feature = "async")]
+        fn credentials_async(&self) -> crate::auth::CredentialsFuture<'_> {
+            Box::pin(async {
+                let creds = crate::auth::Credentials::new("AKIA_TEST", "SECRET_TEST")?;
+                Ok(crate::auth::CredentialsSnapshot::new(creds))
+            })
+        }
+
+        #[cfg(feature = "blocking")]
+        fn credentials_blocking(&self) -> crate::Result<crate::auth::CredentialsSnapshot> {
+            let creds = crate::auth::Credentials::new("AKIA_TEST", "SECRET_TEST")?;
+            Ok(crate::auth::CredentialsSnapshot::new(creds))
+        }
+    }
+
     #[test]
     fn builder_defaults_tls_root_store_to_backend_default() {
         let builder = ClientBuilder::new("https://s3.example.com").expect("builder should parse");
@@ -406,6 +425,34 @@ mod tests {
             .tls_root_store(AsyncTlsRootStore::WebPki)
             .build();
         assert!(client.is_ok(), "rustls should accept WebPki root store");
+    }
+
+    #[test]
+    fn presign_with_provider_returns_actionable_error() {
+        let client = Client::builder("https://s3.example.com")
+            .expect("builder should parse")
+            .region("us-east-1")
+            .auth(Auth::provider(std::sync::Arc::new(FixedProvider)))
+            .build()
+            .expect("client should build");
+
+        let err = client
+            .presign(
+                Method::GET,
+                "bucket",
+                "key",
+                Duration::from_secs(60),
+                Vec::new(),
+                HeaderMap::new(),
+            )
+            .expect_err("presign should require static credentials");
+
+        match err {
+            Error::InvalidConfig { message } => {
+                assert!(message.contains("Presign*Request::build_async"));
+            }
+            other => panic!("expected invalid config error, got {other:?}"),
+        }
     }
 
     #[cfg(all(feature = "native-tls", not(feature = "rustls")))]
