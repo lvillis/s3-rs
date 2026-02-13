@@ -1,3 +1,15 @@
+## [0.1.14] - 2026-02-13
+
+### 🐛 Bug Fixes
+
+- *(store)* Harden reqx redirect checks and S3 request validation
+- *(store)* Enforce strict redirect URI query matching
+- Harden transport error handling and unify shared API validation helpers
+- *(store)* Harden retry/presign guards and dedupe transport/client
+- *(store)* Harden retry-after cap, error redaction and dual-mode refresh
+- *(store)* Harden retry/trace redaction and rate-limit error mapping
+- *(store)* Tighten host redaction, service error metrics, and async presign guidance
+- *(store)* Reject endpoint userinfo and redact s3.request host
 ## [0.1.13] - 2026-02-12
 
 ### 🐛 Bug Fixes
@@ -7,6 +19,7 @@
 ### ⚙️ Miscellaneous Tasks
 
 - Fmt
+- Release s3 version 0.1.13
 ## [0.1.12] - 2026-02-12
 
 ### 🐛 Bug Fixes
