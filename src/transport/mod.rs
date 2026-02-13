@@ -201,21 +201,13 @@ pub(crate) fn followed_redirect(request_url: &Url, response_uri: &str) -> bool {
         return true;
     };
 
-    // reqx may omit query parameters from `resp.uri()` for non-redirect responses.
-    // Treat query loss as equivalent, but still detect query changes/additions.
-    let query_changed = match (request_url.query(), response_url.query()) {
-        (Some(request_query), Some(response_query)) => request_query != response_query,
-        (None, Some(_)) => true,
-        (Some(_), None) | (None, None) => false,
-    };
-
     request_url.scheme() != response_url.scheme()
         || request_url.username() != response_url.username()
         || request_url.password() != response_url.password()
         || request_url.host_str() != response_url.host_str()
         || request_url.port_or_known_default() != response_url.port_or_known_default()
         || request_url.path() != response_url.path()
-        || query_changed
+        || request_url.query() != response_url.query()
 }
 
 #[cfg(any(feature = "async", feature = "blocking"))]
@@ -385,11 +377,11 @@ mod tests {
 
     #[cfg(any(feature = "async", feature = "blocking"))]
     #[test]
-    fn followed_redirect_ignores_query_loss_when_authority_and_path_match() {
+    fn followed_redirect_flags_query_loss_when_authority_and_path_match() {
         let request_url =
             Url::parse("http://127.0.0.1:9000/demo-bucket?list-type=2&max-keys=1").unwrap();
         let response_uri = "http://127.0.0.1:9000/demo-bucket";
-        assert!(!followed_redirect(&request_url, response_uri));
+        assert!(followed_redirect(&request_url, response_uri));
     }
 
     #[cfg(any(feature = "async", feature = "blocking"))]
