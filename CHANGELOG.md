@@ -3,6 +3,10 @@
 ### 🐛 Bug Fixes
 
 - *(infra)* Dedupe CI runs and resolve clippy warnings
+
+### ⚙️ Miscellaneous Tasks
+
+- Release s3 version 0.1.15
 ## [0.1.14] - 2026-02-13
 
 ### 🐛 Bug Fixes
