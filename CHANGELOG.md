@@ -1,3 +1,8 @@
+## [0.1.16] - 2026-02-24
+
+### ⚙️ Miscellaneous Tasks
+
+- Release s3 version 0.1.16
 ## [0.1.15] - 2026-02-13
 
 ### 🐛 Bug Fixes
