@@ -1,3 +1,8 @@
+## [0.1.20] - 2026-03-06
+
+### 🐛 Bug Fixes
+
+- Restore no-default-features test compatibility
 ## [0.1.19] - 2026-03-06
 
 ### 🐛 Bug Fixes
@@ -7,6 +12,10 @@
 ### 🚜 Refactor
 
 - Adopt reqx-native transport flow
+
+### ⚙️ Miscellaneous Tasks
+
+- Release s3 version 0.1.19
 ## [0.1.18] - 2026-03-04
 
 ### ⚙️ Miscellaneous Tasks
