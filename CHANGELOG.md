@@ -1,3 +1,17 @@
+## [0.1.19] - 2026-03-06
+
+### 🐛 Bug Fixes
+
+- Harden feature gating, add blocking reader uploads
+
+### 🚜 Refactor
+
+- Adopt reqx-native transport flow
+## [0.1.18] - 2026-03-04
+
+### ⚙️ Miscellaneous Tasks
+
+- Release s3 version 0.1.18
 ## [0.1.17] - 2026-02-25
 
 ### ⚙️ Miscellaneous Tasks
