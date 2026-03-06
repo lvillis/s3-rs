@@ -10,7 +10,7 @@ Lean, modern, unofficial S3-compatible client for Rust.
 
 ## Highlights
 
-- Async + blocking clients (consistent API shape)
+- Async + blocking clients with closely aligned APIs
 - Presigned URLs and multipart upload
 - Optional checksums, tracing, and metrics
 - Integration-tested against MinIO and RustFS

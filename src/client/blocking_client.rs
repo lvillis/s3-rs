@@ -4,7 +4,7 @@ use http::{HeaderMap, Method};
 use time::OffsetDateTime;
 use url::Url;
 
-use super::common::{sign_with_snapshot, validate_presign_credentials_lifetime};
+use super::common::{parse_endpoint, sign_with_snapshot, validate_presign_credentials_lifetime};
 
 use crate::{
     api,
@@ -109,6 +109,7 @@ impl BlockingClient {
             let payload_hash = match &body {
                 BlockingBody::Empty => util::signing::payload_hash_empty(),
                 BlockingBody::Bytes(b) => util::signing::payload_hash_bytes(b),
+                BlockingBody::Reader { .. } => util::signing::UNSIGNED_PAYLOAD.to_string(),
             };
 
             sign_with_snapshot(
@@ -149,6 +150,7 @@ impl BlockingClient {
             let payload_hash = match &body {
                 BlockingBody::Empty => util::signing::payload_hash_empty(),
                 BlockingBody::Bytes(b) => util::signing::payload_hash_bytes(b),
+                BlockingBody::Reader { .. } => util::signing::UNSIGNED_PAYLOAD.to_string(),
             };
 
             sign_with_snapshot(
@@ -205,28 +207,7 @@ impl BlockingClient {
 
 impl BlockingClientBuilder {
     fn new(endpoint: &str) -> Result<Self> {
-        let endpoint = Url::parse(endpoint)
-            .map_err(|_| Error::invalid_config("endpoint must be a valid absolute URL"))?;
-
-        if endpoint.scheme() != "http" && endpoint.scheme() != "https" {
-            return Err(Error::invalid_config(
-                "endpoint scheme must be http or https",
-            ));
-        }
-        if endpoint.host_str().is_none() {
-            return Err(Error::invalid_config("endpoint must include host"));
-        }
-        if !endpoint.username().is_empty() || endpoint.password().is_some() {
-            return Err(Error::invalid_config("endpoint must not include user info"));
-        }
-        if endpoint.query().is_some() || endpoint.fragment().is_some() {
-            return Err(Error::invalid_config(
-                "endpoint must not include query or fragment",
-            ));
-        }
-        if endpoint.path() != "/" && !endpoint.path().is_empty() {
-            return Err(Error::invalid_config("endpoint must not include a path"));
-        }
+        let endpoint = parse_endpoint(endpoint)?;
 
         Ok(Self {
             endpoint,

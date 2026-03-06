@@ -1,6 +1,8 @@
 #![cfg(feature = "blocking")]
 #![allow(clippy::result_large_err)]
 
+use std::io::Cursor;
+
 use bytes::Bytes;
 use http::HeaderValue;
 use http::StatusCode;
@@ -161,6 +163,29 @@ fn s3_compat_blocking_virtual_hosted_put_get_delete_roundtrip() -> Result<(), Er
         assert_eq!(got, body);
 
         vhost_client.objects().delete(&bucket, key).send()?;
+        Ok(())
+    })
+}
+
+#[test]
+fn s3_compat_blocking_put_reader_roundtrip() -> Result<(), Error> {
+    let Some(cfg) = common::load_config()? else {
+        return Ok(());
+    };
+
+    let client = common::build_blocking_client(&cfg, AddressingStyle::Path)?;
+    common::with_bucket_blocking(&client, "s3-it-blocking-reader-", |bucket| {
+        let key = "reader.txt";
+        let body = Bytes::from_static(b"streamed body");
+
+        client
+            .objects()
+            .put(&bucket, key)
+            .body_reader_sized(Cursor::new(body.clone()), body.len() as u64)
+            .send()?;
+
+        let got = client.objects().get(&bucket, key).send()?.bytes()?;
+        assert_eq!(got, body);
         Ok(())
     })
 }

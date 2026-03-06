@@ -61,6 +61,7 @@ compile_error!("Enable only one of: rustls, native-tls.");
 ))]
 compile_error!("Enable one of: rustls, native-tls.");
 
+#[cfg(any(feature = "async", feature = "blocking"))]
 /// Service entry points and request builders.
 pub mod api;
 #[cfg(feature = "providers")]

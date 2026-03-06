@@ -26,6 +26,10 @@ const MAX_BUFFERED_RESPONSE_BODY_BYTES: usize = 32 * 1024 * 1024;
 pub(crate) enum BlockingBody {
     Empty,
     Bytes(Bytes),
+    Reader {
+        reader: Box<dyn std::io::Read + Send + 'static>,
+        content_length: Option<u64>,
+    },
 }
 
 impl BlockingBody {
@@ -37,6 +41,7 @@ impl BlockingBody {
         match self {
             Self::Empty => Some(Self::Empty),
             Self::Bytes(b) => Some(Self::Bytes(b.clone())),
+            Self::Reader { .. } => None,
         }
     }
 }
@@ -393,6 +398,18 @@ impl BlockingTransport {
         req = match body {
             BlockingBody::Empty => req,
             BlockingBody::Bytes(b) => req.body_bytes(b),
+            BlockingBody::Reader {
+                reader,
+                content_length,
+            } => {
+                let mut req = req.body_reader(reader);
+                if let Some(len) = content_length {
+                    let value = HeaderValue::from_str(&len.to_string())
+                        .map_err(|_| Error::invalid_config("invalid Content-Length header"))?;
+                    req = req.header(http::header::CONTENT_LENGTH, value);
+                }
+                req
+            }
         };
 
         Ok(req)
@@ -406,7 +423,7 @@ pub(crate) fn response_error(status: StatusCode, headers: &http::HeaderMap, body
 fn ensure_empty_body(body: &BlockingBody) -> Result<()> {
     match body {
         BlockingBody::Empty => Ok(()),
-        BlockingBody::Bytes(_) => Err(Error::invalid_config(
+        BlockingBody::Bytes(_) | BlockingBody::Reader { .. } => Err(Error::invalid_config(
             "this operation does not accept a request body",
         )),
     }

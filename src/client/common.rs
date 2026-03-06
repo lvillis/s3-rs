@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use http::{HeaderMap, Method};
 use time::OffsetDateTime;
+use url::Url;
 
 use crate::{
     auth::{CredentialsSnapshot, Region},
@@ -27,6 +28,33 @@ pub(crate) fn sign_with_snapshot(
         snapshot.credentials(),
         now,
     )
+}
+
+pub(crate) fn parse_endpoint(endpoint: &str) -> Result<Url> {
+    let endpoint = Url::parse(endpoint)
+        .map_err(|_| Error::invalid_config("endpoint must be a valid absolute URL"))?;
+
+    if endpoint.scheme() != "http" && endpoint.scheme() != "https" {
+        return Err(Error::invalid_config(
+            "endpoint scheme must be http or https",
+        ));
+    }
+    if endpoint.host_str().is_none() {
+        return Err(Error::invalid_config("endpoint must include host"));
+    }
+    if !endpoint.username().is_empty() || endpoint.password().is_some() {
+        return Err(Error::invalid_config("endpoint must not include user info"));
+    }
+    if endpoint.query().is_some() || endpoint.fragment().is_some() {
+        return Err(Error::invalid_config(
+            "endpoint must not include query or fragment",
+        ));
+    }
+    if endpoint.path() != "/" && !endpoint.path().is_empty() {
+        return Err(Error::invalid_config("endpoint must not include a path"));
+    }
+
+    Ok(endpoint)
 }
 
 pub(crate) fn validate_presign_credentials_lifetime(
@@ -98,6 +126,27 @@ mod tests {
         match err {
             Error::InvalidConfig { message } => {
                 assert!(message.contains("exceeds credentials lifetime"))
+            }
+            other => panic!("expected invalid config, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_endpoint_accepts_clean_absolute_urls() {
+        let endpoint = parse_endpoint("https://s3.example.com").expect("endpoint should parse");
+        assert_eq!(endpoint.as_str(), "https://s3.example.com/");
+    }
+
+    #[test]
+    fn parse_endpoint_rejects_paths_and_query_strings() {
+        let err = parse_endpoint("https://s3.example.com/path?x=1")
+            .expect_err("endpoint with path and query must be rejected");
+        match err {
+            Error::InvalidConfig { message } => {
+                assert!(
+                    message.contains("path") || message.contains("query or fragment"),
+                    "unexpected message: {message}"
+                );
             }
             other => panic!("expected invalid config, got {other:?}"),
         }

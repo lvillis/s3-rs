@@ -1,5 +1,6 @@
 //! Blocking object operations.
 
+use std::io::Read;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -89,6 +90,7 @@ impl BlockingObjectsService {
             content_encoding: None,
             content_language: None,
             expires: None,
+            content_length: None,
             #[cfg(feature = "checksums")]
             checksum: None,
             metadata: Vec::new(),
@@ -506,6 +508,7 @@ pub struct BlockingPutObjectRequest {
     content_encoding: Option<String>,
     content_language: Option<String>,
     expires: Option<String>,
+    content_length: Option<u64>,
     #[cfg(feature = "checksums")]
     checksum: Option<crate::types::Checksum>,
     metadata: Vec<(String, String)>,
@@ -549,6 +552,12 @@ impl BlockingPutObjectRequest {
         self
     }
 
+    /// Sets the content length (required for reader bodies).
+    pub fn content_length(mut self, value: u64) -> Self {
+        self.content_length = Some(value);
+        self
+    }
+
     /// Adds a user metadata entry.
     pub fn metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.push((key.into(), value.into()));
@@ -566,6 +575,27 @@ impl BlockingPutObjectRequest {
     pub fn body_bytes(mut self, body: impl Into<Bytes>) -> Self {
         self.body = BlockingBody::Bytes(body.into());
         self
+    }
+
+    /// Sets the request body from a reader.
+    pub fn body_reader<R>(mut self, reader: R) -> Self
+    where
+        R: Read + Send + 'static,
+    {
+        self.body = BlockingBody::Reader {
+            reader: Box::new(reader),
+            content_length: None,
+        };
+        self
+    }
+
+    /// Sets a reader body with a known content length.
+    pub fn body_reader_sized<R>(mut self, reader: R, content_length: u64) -> Self
+    where
+        R: Read + Send + 'static,
+    {
+        self.content_length = Some(content_length);
+        self.body_reader(reader)
     }
 
     /// Sends the request.
@@ -609,13 +639,31 @@ impl BlockingPutObjectRequest {
             checksum.apply(&mut headers)?;
         }
 
+        let body = match self.body {
+            BlockingBody::Reader { reader, .. } => {
+                let content_length = self
+                    .content_length
+                    .ok_or_else(|| Error::invalid_config("reader put requires content_length"))?;
+                headers.insert(
+                    http::header::CONTENT_LENGTH,
+                    HeaderValue::from_str(&content_length.to_string())
+                        .map_err(|_| Error::invalid_config("invalid Content-Length header"))?,
+                );
+                BlockingBody::Reader {
+                    reader,
+                    content_length: Some(content_length),
+                }
+            }
+            other => other,
+        };
+
         let resp = self.client.execute(
             Method::PUT,
             Some(&self.bucket),
             Some(&self.key),
             Vec::new(),
             headers,
-            self.body,
+            body,
         )?;
 
         if !resp.status().is_success() {
@@ -1642,6 +1690,30 @@ mod tests {
         match err {
             Error::Decode { .. } => {}
             other => panic!("expected Decode error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blocking_put_reader_requires_content_length() {
+        let client = BlockingClient::builder("https://s3.example.com")
+            .expect("builder should parse")
+            .region("us-east-1")
+            .auth(crate::Auth::Anonymous)
+            .build()
+            .expect("client should build");
+
+        let err = client
+            .objects()
+            .put("bucket", "key")
+            .body_reader(std::io::Cursor::new(b"payload".to_vec()))
+            .send()
+            .expect_err("reader put without content length must fail before transport");
+
+        match err {
+            Error::InvalidConfig { message } => {
+                assert!(message.contains("content_length"));
+            }
+            other => panic!("expected InvalidConfig, got {other:?}"),
         }
     }
 

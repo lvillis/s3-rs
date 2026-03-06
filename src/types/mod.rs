@@ -1,12 +1,15 @@
 //! Shared request and response types.
 
-use bytes::Bytes;
 use http::{HeaderMap, Method};
 use serde::Deserialize;
 use url::Url;
 
 use crate::error::{Error, Result};
 
+#[cfg(feature = "async")]
+use bytes::Bytes;
+#[cfg(feature = "blocking")]
+use bytes::Bytes;
 #[cfg(feature = "async")]
 /// Streaming response body for async operations.
 pub type ByteStream =

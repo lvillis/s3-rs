@@ -9,7 +9,7 @@ documentation = "https://docs.rs/s3"
 keywords = ["s3", "object-storage", "aws", "minio", "sigv4"]
 categories = ["api-bindings", "web-programming::http-client"]
 edition = "2024"
-rust-version = "1.93"
+rust-version = "1.94"
 license = "MIT"
 include = [
   "Cargo.toml",
