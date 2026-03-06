@@ -266,7 +266,7 @@ fn request_id_from_headers(headers: &http::HeaderMap) -> Option<String> {
         .map(|v| v.to_string())
 }
 
-#[cfg(any(feature = "async", feature = "blocking"))]
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 pub(crate) fn retry_after_from_headers(headers: &http::HeaderMap) -> Option<Duration> {
     headers
         .get(http::header::RETRY_AFTER)
@@ -294,7 +294,7 @@ pub(crate) fn retry_delay_from_response(
     backoff_delay(config, attempt)
 }
 
-#[cfg(any(feature = "async", feature = "blocking"))]
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 fn parse_retry_after_value(value: &str) -> Option<Duration> {
     let value = value.trim();
     if value.is_empty() {

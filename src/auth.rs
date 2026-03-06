@@ -1060,9 +1060,12 @@ pub enum AddressingStyle {
 mod tests {
     #[cfg(feature = "blocking")]
     use std::sync::Condvar;
+    #[cfg(any(feature = "async", feature = "blocking"))]
     use std::sync::Mutex;
 
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::AtomicUsize;
+    #[cfg(any(feature = "async", feature = "blocking"))]
+    use std::sync::atomic::Ordering;
 
     use super::*;
 
