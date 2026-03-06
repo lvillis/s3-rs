@@ -7,6 +7,11 @@ use std::sync::Mutex;
 #[cfg(feature = "async")]
 use std::{future::Future, pin::Pin};
 
+#[cfg(all(
+    any(feature = "async", feature = "blocking"),
+    any(feature = "credentials-imds", feature = "credentials-sts")
+))]
+use reqx::advanced::TlsRootStore;
 use time::OffsetDateTime;
 
 use crate::{Error, Result};
@@ -83,11 +88,11 @@ impl CredentialsTlsRootStore {
         any(feature = "async", feature = "blocking"),
         any(feature = "credentials-imds", feature = "credentials-sts")
     ))]
-    pub(crate) const fn into_reqx(self) -> reqx::TlsRootStore {
+    pub(crate) const fn into_reqx(self) -> TlsRootStore {
         match self {
-            Self::BackendDefault => reqx::TlsRootStore::BackendDefault,
-            Self::WebPki => reqx::TlsRootStore::WebPki,
-            Self::System => reqx::TlsRootStore::System,
+            Self::BackendDefault => TlsRootStore::BackendDefault,
+            Self::WebPki => TlsRootStore::WebPki,
+            Self::System => TlsRootStore::System,
         }
     }
 }
@@ -1092,15 +1097,15 @@ mod tests {
     fn credentials_tls_root_store_maps_to_reqx_variants() {
         assert_eq!(
             CredentialsTlsRootStore::BackendDefault.into_reqx(),
-            reqx::TlsRootStore::BackendDefault
+            TlsRootStore::BackendDefault
         );
         assert_eq!(
             CredentialsTlsRootStore::WebPki.into_reqx(),
-            reqx::TlsRootStore::WebPki
+            TlsRootStore::WebPki
         );
         assert_eq!(
             CredentialsTlsRootStore::System.into_reqx(),
-            reqx::TlsRootStore::System
+            TlsRootStore::System
         );
     }
 

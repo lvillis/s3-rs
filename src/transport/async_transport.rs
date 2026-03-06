@@ -7,18 +7,18 @@ use bytes::Bytes;
 use futures_core::Stream;
 use http::header::{CONTENT_LENGTH, USER_AGENT};
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
-use reqx::{Client as HttpClient, Response as ReqxResponse};
+use reqx::{
+    Client as HttpClient, Response as ReqxResponse, advanced::TlsRootStore, prelude::RedirectPolicy,
+};
 use url::Url;
 
 #[cfg(feature = "metrics")]
-use crate::transport::{method_label, status_class};
+use crate::transport::method_label;
 use crate::{
     error::{Error, Result},
     transport::{
-        RetryConfig, backoff_delay, default_tls_backend, default_user_agent, followed_redirect,
-        is_retryable_method, map_reqx_error, response_error_from_status, response_service_error,
-        retry_delay_from_response, should_retry_error, should_retry_status,
-        unexpected_redirect_error,
+        RetryConfig, backoff_delay, default_tls_backend, default_user_agent, map_reqx_error,
+        reqx_backoff_source, reqx_retry_policy, response_error_from_status, response_service_error,
     },
 };
 
@@ -94,7 +94,7 @@ impl AsyncTransport {
         retry: RetryConfig,
         user_agent: Option<String>,
         timeout: Option<Duration>,
-        tls_root_store: reqx::TlsRootStore,
+        tls_root_store: TlsRootStore,
     ) -> Result<Self> {
         let user_agent_text = user_agent.unwrap_or_else(default_user_agent);
         let user_agent = HeaderValue::from_str(&user_agent_text)
@@ -102,11 +102,19 @@ impl AsyncTransport {
 
         let mut builder = HttpClient::builder("http://localhost")
             .client_name(user_agent_text)
-            .retry_policy(reqx::RetryPolicy::disabled())
-            .redirect_policy(reqx::RedirectPolicy::none())
+            .retry_policy(reqx_retry_policy(retry))
+            .backoff_source(reqx_backoff_source(retry))
+            .redirect_policy(RedirectPolicy::none())
             .max_response_body_bytes(MAX_BUFFERED_RESPONSE_BODY_BYTES)
             .tls_backend(default_tls_backend())
             .tls_root_store(tls_root_store);
+
+        #[cfg(feature = "metrics")]
+        {
+            builder = builder
+                .observer(crate::transport::TransportMetricsObserver)
+                .interceptor(crate::transport::TransportMetricsInterceptor);
+        }
 
         if let Some(timeout) = timeout {
             builder = builder.request_timeout(timeout);
@@ -130,243 +138,77 @@ impl AsyncTransport {
         headers: HeaderMap,
         body: AsyncBody,
     ) -> Result<AsyncResponse> {
-        match body {
-            body @ AsyncBody::Stream { .. } => {
-                #[cfg(feature = "metrics")]
-                metrics::counter!("s3_http_attempts_total", "method" => method_label(&method))
-                    .increment(1);
-                #[cfg(feature = "tracing")]
-                let _guard = tracing::debug_span!(
-                    "s3.http",
-                    method = %method,
-                    host = crate::transport::redacted_host_for_trace(&url),
-                    path = crate::transport::redacted_path_for_trace(&url),
-                    has_query = url.query().is_some(),
-                    attempt = 1u32,
-                )
-                .entered();
-                #[cfg(feature = "metrics")]
-                let start = Instant::now();
+        let max_attempts = if body.is_replayable() {
+            self.retry.max_attempts
+        } else {
+            1
+        };
+        let replayable_body = body.clone_for_retry();
+        let mut initial_body = Some(body);
+        #[cfg(feature = "metrics")]
+        let start = Instant::now();
 
-                let req = self.build_request(&method, url.clone(), headers, body)?;
-                match req.send_stream().await {
-                    Ok(resp) => {
-                        if followed_redirect(&url, resp.uri()) {
-                            #[cfg(feature = "metrics")]
-                            metrics::counter!(
-                                "s3_http_errors_total",
-                                "method" => method_label(&method),
-                                "kind" => "redirect"
-                            )
-                            .increment(1);
-                            return Err(unexpected_redirect_error(&method, &url, resp.uri()));
-                        }
-                        let resp = resp
-                            .into_response_limited(MAX_BUFFERED_RESPONSE_BODY_BYTES)
-                            .await
-                            .map_err(|err| map_reqx_error("request failed", err))?;
-                        if let Some(err) = response_service_error(
-                            resp.status(),
-                            resp.headers(),
-                            &resp.text_lossy(),
-                        ) && resp.status().is_success()
-                        {
-                            #[cfg(feature = "metrics")]
-                            metrics::counter!(
-                                "s3_http_errors_total",
-                                "method" => method_label(&method),
-                                "kind" => "service"
-                            )
-                            .increment(1);
-                            return Err(err);
-                        }
-                        #[cfg(feature = "metrics")]
-                        {
-                            metrics::counter!(
-                                "s3_http_responses_total",
-                                "method" => method_label(&method),
-                                "class" => status_class(resp.status()),
-                            )
-                            .increment(1);
-                            metrics::histogram!(
-                                "s3_http_request_duration_seconds",
-                                "method" => method_label(&method),
-                            )
-                            .record(start.elapsed().as_secs_f64());
-                        }
-                        Ok(AsyncResponse::from_reqx(resp))
+        for attempt in 1..=max_attempts {
+            let current_body = if let Some(body) = initial_body.take() {
+                body
+            } else {
+                match replayable_body.as_ref() {
+                    Some(AsyncBody::Empty) => AsyncBody::Empty,
+                    Some(AsyncBody::Bytes(bytes)) => AsyncBody::Bytes(bytes.clone()),
+                    Some(AsyncBody::Stream { .. }) | None => {
+                        return Err(Error::transport("request body is not replayable", None));
                     }
-                    Err(err) => {
-                        #[cfg(feature = "metrics")]
+                }
+            };
+            let req = self.build_request(&method, url.clone(), headers.clone(), current_body)?;
+            let resp = req
+                .send_response()
+                .await
+                .map_err(|err| map_reqx_error("request failed", err))?;
+
+            if let Some(err) =
+                response_service_error(resp.status(), resp.headers(), &resp.text_lossy())
+            {
+                if attempt < max_attempts && err.is_retryable() {
+                    #[cfg(feature = "metrics")]
+                    metrics::counter!(
+                        "s3_http_retries_total",
+                        "method" => method_label(&method),
+                        "reason" => "service"
+                    )
+                    .increment(1);
+                    tokio::time::sleep(backoff_delay(self.retry, attempt)).await;
+                    continue;
+                }
+                if resp.status().is_success() {
+                    #[cfg(feature = "metrics")]
+                    {
                         metrics::counter!(
                             "s3_http_errors_total",
                             "method" => method_label(&method),
-                            "kind" => "transport"
+                            "kind" => "service"
                         )
                         .increment(1);
-                        Err(map_reqx_error("request failed", err))
+                        metrics::histogram!(
+                            "s3_http_request_duration_seconds",
+                            "method" => method_label(&method),
+                        )
+                        .record(start.elapsed().as_secs_f64());
                     }
+                    return Err(err);
                 }
             }
-            replayable => {
-                let max_attempts = if replayable.is_replayable() && is_retryable_method(&method) {
-                    self.retry.max_attempts
-                } else {
-                    1
-                };
-                for attempt in 1..=max_attempts {
-                    #[cfg(feature = "metrics")]
-                    metrics::counter!("s3_http_attempts_total", "method" => method_label(&method))
-                        .increment(1);
-                    #[cfg(feature = "tracing")]
-                    let _guard = tracing::debug_span!(
-                        "s3.http",
-                        method = %method,
-                        host = crate::transport::redacted_host_for_trace(&url),
-                        path = crate::transport::redacted_path_for_trace(&url),
-                        has_query = url.query().is_some(),
-                        attempt,
-                    )
-                    .entered();
-                    #[cfg(feature = "metrics")]
-                    let start = Instant::now();
 
-                    let current_body = replayable
-                        .clone_for_retry()
-                        .ok_or_else(|| Error::transport("request body is not replayable", None))?;
-                    let req =
-                        self.build_request(&method, url.clone(), headers.clone(), current_body)?;
-
-                    match req.send_stream().await {
-                        Ok(resp) => {
-                            if followed_redirect(&url, resp.uri()) {
-                                #[cfg(feature = "metrics")]
-                                metrics::counter!(
-                                    "s3_http_errors_total",
-                                    "method" => method_label(&method),
-                                    "kind" => "redirect"
-                                )
-                                .increment(1);
-                                return Err(unexpected_redirect_error(&method, &url, resp.uri()));
-                            }
-                            #[cfg(feature = "metrics")]
-                            metrics::counter!(
-                                "s3_http_responses_total",
-                                "method" => method_label(&method),
-                                "class" => status_class(resp.status()),
-                            )
-                            .increment(1);
-                            #[cfg(feature = "metrics")]
-                            metrics::histogram!(
-                                "s3_http_request_duration_seconds",
-                                "method" => method_label(&method),
-                            )
-                            .record(start.elapsed().as_secs_f64());
-
-                            if should_retry_status(resp.status()) && attempt < max_attempts {
-                                #[cfg(feature = "metrics")]
-                                metrics::counter!(
-                                    "s3_http_retries_total",
-                                    "method" => method_label(&method),
-                                    "reason" => "status"
-                                )
-                                .increment(1);
-                                let delay = retry_delay_from_response(
-                                    self.retry,
-                                    attempt,
-                                    resp.status(),
-                                    resp.headers(),
-                                );
-                                drop(resp);
-                                tokio::time::sleep(delay).await;
-                                continue;
-                            }
-                            let resp = match resp
-                                .into_response_limited(MAX_BUFFERED_RESPONSE_BODY_BYTES)
-                                .await
-                            {
-                                Ok(resp) => resp,
-                                Err(err) => {
-                                    if attempt < max_attempts && should_retry_error(&err) {
-                                        #[cfg(feature = "metrics")]
-                                        metrics::counter!(
-                                            "s3_http_retries_total",
-                                            "method" => method_label(&method),
-                                            "reason" => "transport"
-                                        )
-                                        .increment(1);
-                                        let delay = backoff_delay(self.retry, attempt);
-                                        tokio::time::sleep(delay).await;
-                                        continue;
-                                    }
-                                    return Err(map_reqx_error("request failed", err));
-                                }
-                            };
-                            if let Some(err) = response_service_error(
-                                resp.status(),
-                                resp.headers(),
-                                &resp.text_lossy(),
-                            ) {
-                                if attempt < max_attempts && err.is_retryable() {
-                                    #[cfg(feature = "metrics")]
-                                    metrics::counter!(
-                                        "s3_http_retries_total",
-                                        "method" => method_label(&method),
-                                        "reason" => "service"
-                                    )
-                                    .increment(1);
-                                    let delay = backoff_delay(self.retry, attempt);
-                                    tokio::time::sleep(delay).await;
-                                    continue;
-                                }
-                                if resp.status().is_success() {
-                                    #[cfg(feature = "metrics")]
-                                    metrics::counter!(
-                                        "s3_http_errors_total",
-                                        "method" => method_label(&method),
-                                        "kind" => "service"
-                                    )
-                                    .increment(1);
-                                    return Err(err);
-                                }
-                            }
-                            return Ok(AsyncResponse::from_reqx(resp));
-                        }
-                        Err(err) => {
-                            if attempt < max_attempts && should_retry_error(&err) {
-                                #[cfg(feature = "metrics")]
-                                metrics::counter!(
-                                    "s3_http_retries_total",
-                                    "method" => method_label(&method),
-                                    "reason" => "transport"
-                                )
-                                .increment(1);
-                                let delay = backoff_delay(self.retry, attempt);
-                                tokio::time::sleep(delay).await;
-                                continue;
-                            }
-                            #[cfg(feature = "metrics")]
-                            metrics::counter!(
-                                "s3_http_errors_total",
-                                "method" => method_label(&method),
-                                "kind" => "transport"
-                            )
-                            .increment(1);
-                            return Err(map_reqx_error("request failed", err));
-                        }
-                    }
-                }
-
-                #[cfg(feature = "metrics")]
-                metrics::counter!(
-                    "s3_http_errors_total",
-                    "method" => method_label(&method),
-                    "kind" => "exhausted"
-                )
-                .increment(1);
-                Err(Error::transport("request failed after retries", None))
-            }
+            #[cfg(feature = "metrics")]
+            metrics::histogram!(
+                "s3_http_request_duration_seconds",
+                "method" => method_label(&method),
+            )
+            .record(start.elapsed().as_secs_f64());
+            return Ok(AsyncResponse::from_reqx(resp));
         }
+
+        Err(Error::transport("request failed after retries", None))
     }
 
     pub(crate) async fn send_stream(
@@ -376,63 +218,10 @@ impl AsyncTransport {
         headers: HeaderMap,
         body: AsyncBody,
     ) -> Result<reqx::ResponseStream> {
-        match body {
-            body @ AsyncBody::Stream { .. } => {
-                let req = self.build_request(&method, url.clone(), headers, body)?;
-                let resp = req
-                    .send_stream()
-                    .await
-                    .map_err(|err| map_reqx_error("request failed", err))?;
-                if followed_redirect(&url, resp.uri()) {
-                    return Err(unexpected_redirect_error(&method, &url, resp.uri()));
-                }
-                Ok(resp)
-            }
-            replayable => {
-                let max_attempts = if is_retryable_method(&method) {
-                    self.retry.max_attempts
-                } else {
-                    1
-                };
-                for attempt in 1..=max_attempts {
-                    let current_body = replayable
-                        .clone_for_retry()
-                        .ok_or_else(|| Error::transport("request body is not replayable", None))?;
-                    let req =
-                        self.build_request(&method, url.clone(), headers.clone(), current_body)?;
-
-                    match req.send_stream().await {
-                        Ok(resp) => {
-                            if followed_redirect(&url, resp.uri()) {
-                                return Err(unexpected_redirect_error(&method, &url, resp.uri()));
-                            }
-                            if should_retry_status(resp.status()) && attempt < max_attempts {
-                                let delay = retry_delay_from_response(
-                                    self.retry,
-                                    attempt,
-                                    resp.status(),
-                                    resp.headers(),
-                                );
-                                drop(resp);
-                                tokio::time::sleep(delay).await;
-                                continue;
-                            }
-                            return Ok(resp);
-                        }
-                        Err(err) => {
-                            if attempt < max_attempts && should_retry_error(&err) {
-                                let delay = backoff_delay(self.retry, attempt);
-                                tokio::time::sleep(delay).await;
-                                continue;
-                            }
-                            return Err(map_reqx_error("request failed", err));
-                        }
-                    }
-                }
-
-                Err(Error::transport("request failed after retries", None))
-            }
-        }
+        let req = self.build_request(&method, url, headers, body)?;
+        req.send_response_stream()
+            .await
+            .map_err(|err| map_reqx_error("request failed", err))
     }
 
     fn build_request(
@@ -449,9 +238,6 @@ impl AsyncTransport {
         let mut req = self
             .client
             .request(method.clone(), url.as_str().to_string())
-            .retry_policy(reqx::RetryPolicy::disabled())
-            .redirect_policy(reqx::RedirectPolicy::none())
-            .status_policy(reqx::StatusPolicy::Response)
             .header(USER_AGENT, self.user_agent.clone());
 
         for (name, value) in headers {
@@ -462,7 +248,7 @@ impl AsyncTransport {
 
         req = match body {
             AsyncBody::Empty => req,
-            AsyncBody::Bytes(b) => req.body_bytes(b),
+            AsyncBody::Bytes(b) => req.body(b),
             AsyncBody::Stream {
                 stream,
                 content_length,
@@ -504,6 +290,10 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
+
+    mod reqx {
+        pub use ::reqx::advanced::TlsRootStore;
+    }
 
     fn spawn_test_server(
         responses: Vec<Vec<u8>>,
@@ -1191,16 +981,12 @@ mod tests {
             Some("gzip")
         );
 
-        use http_body_util::BodyExt as _;
-        let mut body = resp.into_body();
+        use tokio::io::AsyncReadExt as _;
+        let mut resp = resp;
         let mut out = Vec::new();
-        while let Some(frame) = body.frame().await {
-            let frame =
-                frame.map_err(|e| Error::transport("body stream error", Some(Box::new(e))))?;
-            if let Some(data) = frame.data_ref() {
-                out.extend_from_slice(data);
-            }
-        }
+        resp.read_to_end(&mut out)
+            .await
+            .map_err(|e| Error::transport("body stream error", Some(Box::new(e))))?;
 
         handle
             .join()
@@ -1228,14 +1014,12 @@ mod tests {
         let resp = transport
             .send_stream(Method::GET, url, HeaderMap::new(), AsyncBody::Empty)
             .await?;
-        use http_body_util::BodyExt as _;
-        let mut body = resp.into_body();
+        use tokio::io::AsyncReadExt as _;
+        let mut resp = resp;
         let mut saw_error = false;
-        while let Some(frame) = body.frame().await {
-            if frame.is_err() {
-                saw_error = true;
-                break;
-            }
+        let mut out = Vec::new();
+        if resp.read_to_end(&mut out).await.is_err() {
+            saw_error = true;
         }
         handle
             .join()
@@ -1338,7 +1122,13 @@ mod tests {
     #[test]
     fn followed_redirect_treats_unparseable_different_uri_as_redirect() {
         let request_url = Url::parse("https://example.com/path?x=1").expect("valid URL");
-        assert!(!followed_redirect(&request_url, request_url.as_str()));
-        assert!(followed_redirect(&request_url, "not-a-valid-uri"));
+        assert!(!crate::transport::followed_redirect(
+            &request_url,
+            request_url.as_str()
+        ));
+        assert!(crate::transport::followed_redirect(
+            &request_url,
+            "not-a-valid-uri"
+        ));
     }
 }

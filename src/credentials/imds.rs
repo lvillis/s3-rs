@@ -1,5 +1,11 @@
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
+#[cfg(any(feature = "async", feature = "blocking"))]
+use reqx::{
+    advanced::TlsRootStore,
+    prelude::{RedirectPolicy, RetryPolicy, StatusPolicy},
+};
+
 use crate::{
     auth::{Credentials, CredentialsSnapshot},
     error::Error,
@@ -129,9 +135,7 @@ fn should_fallback_to_imds_v1_from_token_error(err: &Error) -> bool {
 }
 
 #[cfg(feature = "async")]
-pub(crate) async fn load_async(
-    tls_root_store: reqx::TlsRootStore,
-) -> Result<CredentialsSnapshot, Error> {
+pub(crate) async fn load_async(tls_root_store: TlsRootStore) -> Result<CredentialsSnapshot, Error> {
     use std::time::Duration;
 
     let client = metadata_async_client(Duration::from_secs(2), tls_root_store)?;
@@ -211,7 +215,7 @@ async fn http_get_text(
 ) -> Result<String, Error> {
     let mut req = client
         .request(http::Method::GET, url.to_string())
-        .redirect_policy(reqx::RedirectPolicy::none());
+        .redirect_policy(RedirectPolicy::none());
     for (name, value) in headers {
         if let Some(name) = name {
             req = req.header(name, value);
@@ -219,7 +223,7 @@ async fn http_get_text(
     }
 
     let resp = req
-        .status_policy(reqx::StatusPolicy::Response)
+        .status_policy(StatusPolicy::Response)
         .send()
         .await
         .map_err(|e| crate::transport::map_reqx_error("request failed", e))?;
@@ -242,12 +246,12 @@ async fn fetch_imds_v2_token(client: &reqx::Client) -> Result<String, Error> {
             http::Method::PUT,
             "http://169.254.169.254/latest/api/token".to_string(),
         )
-        .redirect_policy(reqx::RedirectPolicy::none())
+        .redirect_policy(RedirectPolicy::none())
         .header(
             http::header::HeaderName::from_static("x-aws-ec2-metadata-token-ttl-seconds"),
             http::HeaderValue::from_static("21600"),
         )
-        .status_policy(reqx::StatusPolicy::Response)
+        .status_policy(StatusPolicy::Response)
         .send()
         .await
         .map_err(|e| crate::transport::map_reqx_error("request failed", e))?;
@@ -285,9 +289,7 @@ fn container_auth_headers() -> Result<http::HeaderMap, Error> {
 }
 
 #[cfg(feature = "blocking")]
-pub(crate) fn load_blocking(
-    tls_root_store: reqx::TlsRootStore,
-) -> Result<CredentialsSnapshot, Error> {
+pub(crate) fn load_blocking(tls_root_store: TlsRootStore) -> Result<CredentialsSnapshot, Error> {
     use std::time::Duration;
 
     let client = metadata_blocking_client(Duration::from_secs(2), tls_root_store)?;
@@ -366,13 +368,13 @@ fn http_get_text_blocking(
 ) -> Result<String, Error> {
     let mut req = client
         .request(http::Method::GET, url.to_string())
-        .redirect_policy(reqx::RedirectPolicy::none());
+        .redirect_policy(RedirectPolicy::none());
     for (name, value) in headers {
         req = req.header(name.clone(), value.clone());
     }
 
     let resp = req
-        .status_policy(reqx::StatusPolicy::Response)
+        .status_policy(StatusPolicy::Response)
         .send()
         .map_err(|e| crate::transport::map_reqx_error("request failed", e))?;
     let status = resp.status();
@@ -396,12 +398,12 @@ fn fetch_imds_v2_token_blocking(client: &reqx::blocking::Client) -> Result<Strin
             http::Method::PUT,
             "http://169.254.169.254/latest/api/token".to_string(),
         )
-        .redirect_policy(reqx::RedirectPolicy::none())
+        .redirect_policy(RedirectPolicy::none())
         .header(
             http::header::HeaderName::from_static("x-aws-ec2-metadata-token-ttl-seconds"),
             http::HeaderValue::from_static("21600"),
         )
-        .status_policy(reqx::StatusPolicy::Response)
+        .status_policy(StatusPolicy::Response)
         .send()
         .map_err(|e| crate::transport::map_reqx_error("request failed", e))?;
 
@@ -443,13 +445,13 @@ fn container_auth_headers_blocking() -> Result<http::HeaderMap, Error> {
 #[cfg(feature = "async")]
 fn metadata_async_client(
     timeout: std::time::Duration,
-    tls_root_store: reqx::TlsRootStore,
+    tls_root_store: TlsRootStore,
 ) -> Result<reqx::Client, Error> {
     reqx::Client::builder("http://localhost")
         .request_timeout(timeout)
-        .retry_policy(reqx::RetryPolicy::disabled())
-        .redirect_policy(reqx::RedirectPolicy::none())
-        .default_status_policy(reqx::StatusPolicy::Response)
+        .retry_policy(RetryPolicy::disabled())
+        .redirect_policy(RedirectPolicy::none())
+        .default_status_policy(StatusPolicy::Response)
         .max_response_body_bytes(1024 * 1024)
         .tls_backend(crate::transport::default_tls_backend())
         .tls_root_store(tls_root_store)
@@ -461,13 +463,13 @@ fn metadata_async_client(
 #[cfg(feature = "blocking")]
 fn metadata_blocking_client(
     timeout: std::time::Duration,
-    tls_root_store: reqx::TlsRootStore,
+    tls_root_store: TlsRootStore,
 ) -> Result<reqx::blocking::Client, Error> {
     reqx::blocking::Client::builder("http://localhost")
         .request_timeout(timeout)
-        .retry_policy(reqx::RetryPolicy::disabled())
-        .redirect_policy(reqx::RedirectPolicy::none())
-        .default_status_policy(reqx::StatusPolicy::Response)
+        .retry_policy(RetryPolicy::disabled())
+        .redirect_policy(RedirectPolicy::none())
+        .default_status_policy(StatusPolicy::Response)
         .max_response_body_bytes(1024 * 1024)
         .tls_backend(crate::transport::default_tls_backend())
         .tls_root_store(tls_root_store)
@@ -704,10 +706,9 @@ mod tests {
     #[cfg(feature = "async")]
     #[test]
     fn metadata_async_client_accepts_backend_default() {
-        let client =
-            metadata_async_client(Duration::from_secs(1), reqx::TlsRootStore::BackendDefault);
+        let client = metadata_async_client(Duration::from_secs(1), TlsRootStore::BackendDefault);
         let client = client.expect("async metadata client should build");
-        assert_eq!(client.default_status_policy(), reqx::StatusPolicy::Response);
+        assert_eq!(client.default_status_policy(), StatusPolicy::Response);
     }
 
     #[cfg(feature = "async")]
@@ -716,8 +717,7 @@ mod tests {
         let (addr, handle) = spawn_test_server(
             b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 3\r\nx-amz-request-id: req-1\r\nContent-Length: 4\r\nConnection: close\r\n\r\nslow".to_vec(),
         )?;
-        let client =
-            metadata_async_client(Duration::from_secs(2), reqx::TlsRootStore::BackendDefault)?;
+        let client = metadata_async_client(Duration::from_secs(2), TlsRootStore::BackendDefault)?;
         let url = format!("http://{addr}/");
 
         let err = http_get_text(&client, &url, http::HeaderMap::new())
@@ -745,14 +745,14 @@ mod tests {
     #[cfg(all(feature = "async", feature = "rustls"))]
     #[test]
     fn metadata_async_client_accepts_webpki_on_rustls() {
-        let client = metadata_async_client(Duration::from_secs(1), reqx::TlsRootStore::WebPki);
+        let client = metadata_async_client(Duration::from_secs(1), TlsRootStore::WebPki);
         assert!(client.is_ok(), "rustls should accept WebPki root store");
     }
 
     #[cfg(all(feature = "async", feature = "native-tls", not(feature = "rustls")))]
     #[test]
     fn metadata_async_client_rejects_webpki_on_native_tls() {
-        let err = match metadata_async_client(Duration::from_secs(1), reqx::TlsRootStore::WebPki) {
+        let err = match metadata_async_client(Duration::from_secs(1), TlsRootStore::WebPki) {
             Ok(_) => panic!("native-tls should reject WebPki root store"),
             Err(err) => err,
         };
@@ -762,10 +762,9 @@ mod tests {
     #[cfg(feature = "blocking")]
     #[test]
     fn metadata_blocking_client_accepts_backend_default() {
-        let client =
-            metadata_blocking_client(Duration::from_secs(1), reqx::TlsRootStore::BackendDefault);
+        let client = metadata_blocking_client(Duration::from_secs(1), TlsRootStore::BackendDefault);
         let client = client.expect("blocking metadata client should build");
-        assert_eq!(client.default_status_policy(), reqx::StatusPolicy::Response);
+        assert_eq!(client.default_status_policy(), StatusPolicy::Response);
     }
 
     #[cfg(feature = "blocking")]
@@ -775,7 +774,7 @@ mod tests {
             b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 3\r\nx-amz-request-id: req-1\r\nContent-Length: 4\r\nConnection: close\r\n\r\nslow".to_vec(),
         )?;
         let client =
-            metadata_blocking_client(Duration::from_secs(2), reqx::TlsRootStore::BackendDefault)?;
+            metadata_blocking_client(Duration::from_secs(2), TlsRootStore::BackendDefault)?;
         let url = format!("http://{addr}/");
 
         let err = http_get_text_blocking(&client, &url, &http::HeaderMap::new())
@@ -802,7 +801,7 @@ mod tests {
     #[cfg(all(feature = "blocking", feature = "rustls"))]
     #[test]
     fn metadata_blocking_client_accepts_webpki_on_rustls() {
-        let client = metadata_blocking_client(Duration::from_secs(1), reqx::TlsRootStore::WebPki);
+        let client = metadata_blocking_client(Duration::from_secs(1), TlsRootStore::WebPki);
         assert!(client.is_ok(), "rustls should accept WebPki root store");
     }
 
@@ -810,7 +809,7 @@ mod tests {
     #[test]
     fn metadata_blocking_client_accepts_webpki_on_native_tls() {
         // reqx blocking transport (ureq backend) accepts WebPki roots on native-tls.
-        let client = metadata_blocking_client(Duration::from_secs(1), reqx::TlsRootStore::WebPki);
+        let client = metadata_blocking_client(Duration::from_secs(1), TlsRootStore::WebPki);
         assert!(
             client.is_ok(),
             "native-tls should build with WebPki root store"

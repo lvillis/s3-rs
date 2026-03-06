@@ -7,17 +7,16 @@ use std::time::Instant;
 use bytes::Bytes;
 use http::header::USER_AGENT;
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
+use reqx::{advanced::TlsRootStore, prelude::RedirectPolicy};
 use url::Url;
 
 #[cfg(feature = "metrics")]
-use crate::transport::{method_label, status_class};
+use crate::transport::method_label;
 use crate::{
     error::{Error, Result},
     transport::{
-        RetryConfig, backoff_delay, default_tls_backend, default_user_agent, followed_redirect,
-        is_retryable_method, map_reqx_error, redacted_request_context, response_error_from_status,
-        response_service_error, retry_delay_from_response, should_retry_error, should_retry_status,
-        unexpected_redirect_error,
+        RetryConfig, backoff_delay, default_tls_backend, default_user_agent, map_reqx_error,
+        reqx_backoff_source, reqx_retry_policy, response_error_from_status, response_service_error,
     },
 };
 
@@ -98,7 +97,7 @@ impl BlockingTransport {
         retry: RetryConfig,
         user_agent: Option<String>,
         timeout: Option<Duration>,
-        tls_root_store: reqx::TlsRootStore,
+        tls_root_store: TlsRootStore,
     ) -> Result<Self> {
         let user_agent_text = user_agent.unwrap_or_else(default_user_agent);
         let user_agent = HeaderValue::from_str(&user_agent_text)
@@ -106,11 +105,19 @@ impl BlockingTransport {
 
         let mut builder = reqx::blocking::Client::builder("http://localhost")
             .client_name(user_agent_text)
-            .retry_policy(reqx::RetryPolicy::disabled())
-            .redirect_policy(reqx::RedirectPolicy::none())
+            .retry_policy(reqx_retry_policy(retry))
+            .backoff_source(reqx_backoff_source(retry))
+            .redirect_policy(RedirectPolicy::none())
             .max_response_body_bytes(MAX_BUFFERED_RESPONSE_BODY_BYTES)
             .tls_backend(default_tls_backend())
             .tls_root_store(tls_root_store);
+
+        #[cfg(feature = "metrics")]
+        {
+            builder = builder
+                .observer(crate::transport::TransportMetricsObserver)
+                .interceptor(crate::transport::TransportMetricsInterceptor);
+        }
 
         if let Some(timeout) = timeout {
             builder = builder.request_timeout(timeout);
@@ -134,134 +141,32 @@ impl BlockingTransport {
         headers: HeaderMap,
         body: BlockingBody,
     ) -> Result<BlockingResponse> {
-        let max_attempts = if body.is_replayable() && is_retryable_method(&method) {
+        let max_attempts = if body.is_replayable() {
             self.retry.max_attempts
         } else {
             1
         };
+        let replayable_body = body.clone_for_retry();
+        let mut initial_body = Some(body);
+        #[cfg(feature = "metrics")]
+        let start = Instant::now();
 
         for attempt in 1..=max_attempts {
-            #[cfg(feature = "metrics")]
-            metrics::counter!("s3_http_attempts_total", "method" => method_label(&method))
-                .increment(1);
-            #[cfg(feature = "tracing")]
-            let _guard = tracing::debug_span!(
-                "s3.http",
-                method = %method,
-                host = crate::transport::redacted_host_for_trace(&url),
-                path = crate::transport::redacted_path_for_trace(&url),
-                has_query = url.query().is_some(),
-                attempt,
-            )
-            .entered();
-            #[cfg(feature = "metrics")]
-            let start = Instant::now();
-
-            let current_body = body
-                .clone_for_retry()
-                .ok_or_else(|| Error::transport("request body is not replayable", None))?;
+            let current_body = if let Some(body) = initial_body.take() {
+                body
+            } else {
+                match replayable_body.as_ref() {
+                    Some(BlockingBody::Empty) => BlockingBody::Empty,
+                    Some(BlockingBody::Bytes(bytes)) => BlockingBody::Bytes(bytes.clone()),
+                    Some(BlockingBody::Reader { .. }) | None => {
+                        return Err(Error::transport("request body is not replayable", None));
+                    }
+                }
+            };
             let req = self.build_request(&method, url.clone(), headers.clone(), current_body)?;
-
-            let resp = match req.send_stream() {
-                Ok(resp) => resp,
-                Err(err) => {
-                    if attempt < max_attempts && should_retry_error(&err) {
-                        #[cfg(feature = "metrics")]
-                        metrics::counter!(
-                            "s3_http_retries_total",
-                            "method" => method_label(&method),
-                            "reason" => "transport"
-                        )
-                        .increment(1);
-                        #[cfg(feature = "tracing")]
-                        tracing::debug!(error = ?err, "retrying after transport error");
-
-                        let delay = backoff_delay(self.retry, attempt);
-                        std::thread::sleep(delay);
-                        continue;
-                    }
-
-                    #[cfg(feature = "metrics")]
-                    metrics::counter!(
-                        "s3_http_errors_total",
-                        "method" => method_label(&method),
-                        "kind" => "transport"
-                    )
-                    .increment(1);
-
-                    return Err(map_reqx_error(
-                        &format!(
-                            "request failed: {}",
-                            redacted_request_context(&method, &url)
-                        ),
-                        err,
-                    ));
-                }
-            };
-
-            if followed_redirect(&url, resp.uri()) {
-                #[cfg(feature = "metrics")]
-                metrics::counter!(
-                    "s3_http_errors_total",
-                    "method" => method_label(&method),
-                    "kind" => "redirect"
-                )
-                .increment(1);
-                return Err(unexpected_redirect_error(&method, &url, resp.uri()));
-            }
-
-            #[cfg(feature = "metrics")]
-            {
-                metrics::counter!(
-                    "s3_http_responses_total",
-                    "method" => method_label(&method),
-                    "class" => status_class(resp.status()),
-                )
-                .increment(1);
-                metrics::histogram!(
-                    "s3_http_request_duration_seconds",
-                    "method" => method_label(&method),
-                )
-                .record(start.elapsed().as_secs_f64());
-            }
-
-            if should_retry_status(resp.status()) && attempt < max_attempts {
-                #[cfg(feature = "metrics")]
-                metrics::counter!(
-                    "s3_http_retries_total",
-                    "method" => method_label(&method),
-                    "reason" => "status"
-                )
-                .increment(1);
-                #[cfg(feature = "tracing")]
-                tracing::debug!(status = %resp.status(), "retrying after response status");
-
-                let delay =
-                    retry_delay_from_response(self.retry, attempt, resp.status(), resp.headers());
-                drop(resp);
-                std::thread::sleep(delay);
-                continue;
-            }
-
-            let resp = resp.into_response_limited(MAX_BUFFERED_RESPONSE_BODY_BYTES);
-            let resp = match resp {
-                Ok(resp) => resp,
-                Err(err) => {
-                    if attempt < max_attempts && should_retry_error(&err) {
-                        #[cfg(feature = "metrics")]
-                        metrics::counter!(
-                            "s3_http_retries_total",
-                            "method" => method_label(&method),
-                            "reason" => "transport"
-                        )
-                        .increment(1);
-                        let delay = backoff_delay(self.retry, attempt);
-                        std::thread::sleep(delay);
-                        continue;
-                    }
-                    return Err(map_reqx_error("request failed", err));
-                }
-            };
+            let resp = req
+                .send_response()
+                .map_err(|err| map_reqx_error("request failed", err))?;
             if let Some(err) =
                 response_service_error(resp.status(), resp.headers(), &resp.text_lossy())
             {
@@ -279,32 +184,32 @@ impl BlockingTransport {
                 }
                 if resp.status().is_success() {
                     #[cfg(feature = "metrics")]
-                    metrics::counter!(
-                        "s3_http_errors_total",
-                        "method" => method_label(&method),
-                        "kind" => "service"
-                    )
-                    .increment(1);
+                    {
+                        metrics::counter!(
+                            "s3_http_errors_total",
+                            "method" => method_label(&method),
+                            "kind" => "service"
+                        )
+                        .increment(1);
+                        metrics::histogram!(
+                            "s3_http_request_duration_seconds",
+                            "method" => method_label(&method),
+                        )
+                        .record(start.elapsed().as_secs_f64());
+                    }
                     return Err(err);
                 }
             }
+            #[cfg(feature = "metrics")]
+            metrics::histogram!(
+                "s3_http_request_duration_seconds",
+                "method" => method_label(&method),
+            )
+            .record(start.elapsed().as_secs_f64());
             return Ok(BlockingResponse::from_reqx(resp));
         }
 
-        #[cfg(feature = "metrics")]
-        metrics::counter!(
-            "s3_http_errors_total",
-            "method" => method_label(&method),
-            "kind" => "exhausted"
-        )
-        .increment(1);
-        Err(Error::transport(
-            format!(
-                "request failed after retries: {}",
-                redacted_request_context(&method, &url)
-            ),
-            None,
-        ))
+        Err(Error::transport("request failed after retries", None))
     }
 
     pub(crate) fn send_stream(
@@ -314,60 +219,9 @@ impl BlockingTransport {
         headers: HeaderMap,
         body: BlockingBody,
     ) -> Result<reqx::blocking::ResponseStream> {
-        let max_attempts = if body.is_replayable() && is_retryable_method(&method) {
-            self.retry.max_attempts
-        } else {
-            1
-        };
-
-        for attempt in 1..=max_attempts {
-            let current_body = body
-                .clone_for_retry()
-                .ok_or_else(|| Error::transport("request body is not replayable", None))?;
-            let req = self.build_request(&method, url.clone(), headers.clone(), current_body)?;
-
-            match req.send_stream() {
-                Ok(resp) => {
-                    if followed_redirect(&url, resp.uri()) {
-                        return Err(unexpected_redirect_error(&method, &url, resp.uri()));
-                    }
-                    if should_retry_status(resp.status()) && attempt < max_attempts {
-                        let delay = retry_delay_from_response(
-                            self.retry,
-                            attempt,
-                            resp.status(),
-                            resp.headers(),
-                        );
-                        drop(resp);
-                        std::thread::sleep(delay);
-                        continue;
-                    }
-                    return Ok(resp);
-                }
-                Err(err) => {
-                    if attempt < max_attempts && should_retry_error(&err) {
-                        let delay = backoff_delay(self.retry, attempt);
-                        std::thread::sleep(delay);
-                        continue;
-                    }
-                    return Err(map_reqx_error(
-                        &format!(
-                            "request failed: {}",
-                            redacted_request_context(&method, &url)
-                        ),
-                        err,
-                    ));
-                }
-            }
-        }
-
-        Err(Error::transport(
-            format!(
-                "request failed after retries: {}",
-                redacted_request_context(&method, &url)
-            ),
-            None,
-        ))
+        let req = self.build_request(&method, url, headers, body)?;
+        req.send_response_stream()
+            .map_err(|err| map_reqx_error("request failed", err))
     }
 
     fn build_request(
@@ -384,9 +238,6 @@ impl BlockingTransport {
         let mut req = self
             .client
             .request(method.clone(), url.as_str().to_string())
-            .retry_policy(reqx::RetryPolicy::disabled())
-            .redirect_policy(reqx::RedirectPolicy::none())
-            .status_policy(reqx::StatusPolicy::Response)
             .header(USER_AGENT, self.user_agent.clone());
 
         for (name, value) in headers {
@@ -397,7 +248,7 @@ impl BlockingTransport {
 
         req = match body {
             BlockingBody::Empty => req,
-            BlockingBody::Bytes(b) => req.body_bytes(b),
+            BlockingBody::Bytes(b) => req.body(b),
             BlockingBody::Reader {
                 reader,
                 content_length,
@@ -438,6 +289,10 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
+
+    mod reqx {
+        pub use ::reqx::advanced::TlsRootStore;
+    }
 
     fn spawn_test_server(
         responses: Vec<Vec<u8>>,
@@ -613,13 +468,24 @@ mod tests {
             Ok(_) => panic!("request should fail with transport error"),
             Err(err) => err,
         };
+        let debug = format!("{err:?}");
 
         match err {
-            Error::Transport { message, .. } => {
-                assert!(message.contains("http://<redacted-host>:1/<redacted>?<redacted>"));
+            Error::Transport { message, source } => {
+                assert_eq!(message, "request failed");
+                let source = source.expect("transport error should preserve a sanitized source");
+                let source_text = source.to_string();
+                assert!(source_text.contains("http://<redacted-host>:1/<redacted>"));
+                assert!(debug.contains("http://<redacted-host>:1/<redacted>"));
                 assert!(!message.contains("127.0.0.1"));
+                assert!(!source_text.contains("127.0.0.1"));
+                assert!(!debug.contains("127.0.0.1"));
                 assert!(!message.contains("private/object/key"));
+                assert!(!source_text.contains("private/object/key"));
+                assert!(!debug.contains("private/object/key"));
                 assert!(!message.contains("token=secret"));
+                assert!(!source_text.contains("token=secret"));
+                assert!(!debug.contains("token=secret"));
             }
             other => panic!("expected transport error, got {other:?}"),
         }
@@ -941,10 +807,9 @@ mod tests {
                 .and_then(|v| v.to_str().ok()),
             Some("gzip")
         );
-        let mut reader = resp.into_body().into_reader();
+        let mut resp = resp;
         let mut out = Vec::new();
-        reader
-            .read_to_end(&mut out)
+        resp.read_to_end(&mut out)
             .map_err(|e| Error::transport("failed to read response body", Some(Box::new(e))))?;
         handle
             .join()
@@ -971,9 +836,9 @@ mod tests {
 
         let resp =
             transport.send_stream(Method::GET, url, HeaderMap::new(), BlockingBody::Empty)?;
-        let mut reader = resp.into_body().into_reader();
+        let mut resp = resp;
         let mut out = Vec::new();
-        let read = reader.read_to_end(&mut out);
+        let read = resp.read_to_end(&mut out);
         handle
             .join()
             .map_err(|_| Error::transport("test server thread panicked", None))?;
@@ -1069,7 +934,13 @@ mod tests {
     #[test]
     fn followed_redirect_treats_unparseable_different_uri_as_redirect() {
         let request_url = Url::parse("https://example.com/path?x=1").expect("valid URL");
-        assert!(!followed_redirect(&request_url, request_url.as_str()));
-        assert!(followed_redirect(&request_url, "not-a-valid-uri"));
+        assert!(!crate::transport::followed_redirect(
+            &request_url,
+            request_url.as_str()
+        ));
+        assert!(crate::transport::followed_redirect(
+            &request_url,
+            "not-a-valid-uri"
+        ));
     }
 }

@@ -450,7 +450,7 @@ impl BlockingGetObjectRequest {
             crate::util::headers::header_string(resp.headers(), http::header::CONTENT_TYPE);
 
         Ok(BlockingGetObjectOutput {
-            body: BlockingByteStream::new(resp.into_body().into_reader()),
+            body: BlockingByteStream::new(resp),
             etag,
             content_length,
             content_type,

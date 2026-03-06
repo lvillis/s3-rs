@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use http::{HeaderMap, Method};
+use reqx::advanced::TlsRootStore;
 use time::OffsetDateTime;
 use url::Url;
 
@@ -310,11 +311,11 @@ impl BlockingClientBuilder {
 }
 
 impl BlockingTlsRootStore {
-    pub(crate) const fn into_reqx(self) -> reqx::TlsRootStore {
+    pub(crate) const fn into_reqx(self) -> TlsRootStore {
         match self {
-            Self::BackendDefault => reqx::TlsRootStore::BackendDefault,
-            Self::WebPki => reqx::TlsRootStore::WebPki,
-            Self::System => reqx::TlsRootStore::System,
+            Self::BackendDefault => TlsRootStore::BackendDefault,
+            Self::WebPki => TlsRootStore::WebPki,
+            Self::System => TlsRootStore::System,
         }
     }
 }

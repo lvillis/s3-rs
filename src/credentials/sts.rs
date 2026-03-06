@@ -1,5 +1,10 @@
 use bytes::Bytes;
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
+#[cfg(any(feature = "async", feature = "blocking"))]
+use reqx::{
+    advanced::TlsRootStore,
+    prelude::{RedirectPolicy, RetryPolicy, StatusPolicy},
+};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::{
@@ -16,7 +21,7 @@ pub(crate) async fn assume_role_async(
     role_arn: String,
     role_session_name: String,
     source_credentials: Credentials,
-    tls_root_store: reqx::TlsRootStore,
+    tls_root_store: TlsRootStore,
 ) -> Result<CredentialsSnapshot, Error> {
     use std::time::Duration;
 
@@ -66,7 +71,7 @@ pub(crate) fn assume_role_blocking(
     role_arn: String,
     role_session_name: String,
     source_credentials: Credentials,
-    tls_root_store: reqx::TlsRootStore,
+    tls_root_store: TlsRootStore,
 ) -> Result<CredentialsSnapshot, Error> {
     use std::time::Duration;
 
@@ -112,7 +117,7 @@ pub(crate) fn assume_role_blocking(
 
 #[cfg(feature = "async")]
 pub(crate) async fn assume_role_with_web_identity_env_async(
-    tls_root_store: reqx::TlsRootStore,
+    tls_root_store: TlsRootStore,
 ) -> Result<CredentialsSnapshot, Error> {
     use std::time::Duration;
 
@@ -147,7 +152,7 @@ pub(crate) async fn assume_role_with_web_identity_env_async(
 
 #[cfg(feature = "blocking")]
 pub(crate) fn assume_role_with_web_identity_env_blocking(
-    tls_root_store: reqx::TlsRootStore,
+    tls_root_store: TlsRootStore,
 ) -> Result<CredentialsSnapshot, Error> {
     use std::time::Duration;
 
@@ -188,9 +193,9 @@ async fn send_form_async(
 ) -> Result<(StatusCode, HeaderMap, String), Error> {
     let mut req = client
         .request(Method::POST, url.to_string())
-        .body_bytes(body)
-        .redirect_policy(reqx::RedirectPolicy::none())
-        .retry_policy(reqx::RetryPolicy::disabled());
+        .body(body)
+        .redirect_policy(RedirectPolicy::none())
+        .retry_policy(RetryPolicy::disabled());
     for (name, value) in headers {
         if let Some(name) = name {
             req = req.header(name, value);
@@ -198,7 +203,7 @@ async fn send_form_async(
     }
 
     let resp = req
-        .status_policy(reqx::StatusPolicy::Response)
+        .status_policy(StatusPolicy::Response)
         .send()
         .await
         .map_err(|e| crate::transport::map_reqx_error("request failed", e))?;
@@ -218,9 +223,9 @@ fn send_form_blocking(
 ) -> Result<(StatusCode, HeaderMap, String), Error> {
     let mut req = client
         .request(Method::POST, url.to_string())
-        .body_bytes(body)
-        .redirect_policy(reqx::RedirectPolicy::none())
-        .retry_policy(reqx::RetryPolicy::disabled());
+        .body(body)
+        .redirect_policy(RedirectPolicy::none())
+        .retry_policy(RetryPolicy::disabled());
     for (name, value) in headers {
         if let Some(name) = name {
             req = req.header(name, value);
@@ -228,7 +233,7 @@ fn send_form_blocking(
     }
 
     let resp = req
-        .status_policy(reqx::StatusPolicy::Response)
+        .status_policy(StatusPolicy::Response)
         .send()
         .map_err(|e| crate::transport::map_reqx_error("request failed", e))?;
     Ok((
@@ -468,13 +473,13 @@ fn parse_assume_role_with_web_identity_response(body: &str) -> Result<Credential
 #[cfg(feature = "async")]
 fn sts_async_client(
     timeout: std::time::Duration,
-    tls_root_store: reqx::TlsRootStore,
+    tls_root_store: TlsRootStore,
 ) -> Result<reqx::Client, Error> {
     reqx::Client::builder("http://localhost")
         .request_timeout(timeout)
-        .retry_policy(reqx::RetryPolicy::disabled())
-        .redirect_policy(reqx::RedirectPolicy::none())
-        .default_status_policy(reqx::StatusPolicy::Response)
+        .retry_policy(RetryPolicy::disabled())
+        .redirect_policy(RedirectPolicy::none())
+        .default_status_policy(StatusPolicy::Response)
         .max_response_body_bytes(4 * 1024 * 1024)
         .tls_backend(crate::transport::default_tls_backend())
         .tls_root_store(tls_root_store)
@@ -486,13 +491,13 @@ fn sts_async_client(
 #[cfg(feature = "blocking")]
 fn sts_blocking_client(
     timeout: std::time::Duration,
-    tls_root_store: reqx::TlsRootStore,
+    tls_root_store: TlsRootStore,
 ) -> Result<reqx::blocking::Client, Error> {
     reqx::blocking::Client::builder("http://localhost")
         .request_timeout(timeout)
-        .retry_policy(reqx::RetryPolicy::disabled())
-        .redirect_policy(reqx::RedirectPolicy::none())
-        .default_status_policy(reqx::StatusPolicy::Response)
+        .retry_policy(RetryPolicy::disabled())
+        .redirect_policy(RedirectPolicy::none())
+        .default_status_policy(StatusPolicy::Response)
         .max_response_body_bytes(4 * 1024 * 1024)
         .tls_backend(crate::transport::default_tls_backend())
         .tls_root_store(tls_root_store)
@@ -753,9 +758,9 @@ mod tests {
     #[cfg(feature = "async")]
     #[test]
     fn sts_async_client_accepts_backend_default() {
-        let client = sts_async_client(Duration::from_secs(1), reqx::TlsRootStore::BackendDefault);
+        let client = sts_async_client(Duration::from_secs(1), TlsRootStore::BackendDefault);
         let client = client.expect("async STS client should build");
-        assert_eq!(client.default_status_policy(), reqx::StatusPolicy::Response);
+        assert_eq!(client.default_status_policy(), StatusPolicy::Response);
     }
 
     #[cfg(feature = "async")]
@@ -765,7 +770,7 @@ mod tests {
         let (addr, handle) = spawn_test_server(
             b"HTTP/1.1 403 Forbidden\r\nx-amz-request-id: req-1\r\nContent-Length: 13\r\nConnection: close\r\n\r\nAccess Denied!".to_vec(),
         )?;
-        let client = sts_async_client(Duration::from_secs(2), reqx::TlsRootStore::BackendDefault)?;
+        let client = sts_async_client(Duration::from_secs(2), TlsRootStore::BackendDefault)?;
         let mut headers = HeaderMap::new();
         headers.insert(
             http::header::CONTENT_TYPE,
@@ -787,14 +792,14 @@ mod tests {
     #[cfg(all(feature = "async", feature = "rustls"))]
     #[test]
     fn sts_async_client_accepts_webpki_on_rustls() {
-        let client = sts_async_client(Duration::from_secs(1), reqx::TlsRootStore::WebPki);
+        let client = sts_async_client(Duration::from_secs(1), TlsRootStore::WebPki);
         assert!(client.is_ok(), "rustls should accept WebPki root store");
     }
 
     #[cfg(all(feature = "async", feature = "native-tls", not(feature = "rustls")))]
     #[test]
     fn sts_async_client_rejects_webpki_on_native_tls() {
-        let err = match sts_async_client(Duration::from_secs(1), reqx::TlsRootStore::WebPki) {
+        let err = match sts_async_client(Duration::from_secs(1), TlsRootStore::WebPki) {
             Ok(_) => panic!("native-tls should reject WebPki root store"),
             Err(err) => err,
         };
@@ -804,10 +809,9 @@ mod tests {
     #[cfg(feature = "blocking")]
     #[test]
     fn sts_blocking_client_accepts_backend_default() {
-        let client =
-            sts_blocking_client(Duration::from_secs(1), reqx::TlsRootStore::BackendDefault);
+        let client = sts_blocking_client(Duration::from_secs(1), TlsRootStore::BackendDefault);
         let client = client.expect("blocking STS client should build");
-        assert_eq!(client.default_status_policy(), reqx::StatusPolicy::Response);
+        assert_eq!(client.default_status_policy(), StatusPolicy::Response);
     }
 
     #[cfg(feature = "blocking")]
@@ -816,8 +820,7 @@ mod tests {
         let (addr, handle) = spawn_test_server(
             b"HTTP/1.1 403 Forbidden\r\nx-amz-request-id: req-1\r\nContent-Length: 13\r\nConnection: close\r\n\r\nAccess Denied!".to_vec(),
         )?;
-        let client =
-            sts_blocking_client(Duration::from_secs(2), reqx::TlsRootStore::BackendDefault)?;
+        let client = sts_blocking_client(Duration::from_secs(2), TlsRootStore::BackendDefault)?;
         let mut headers = HeaderMap::new();
         headers.insert(
             http::header::CONTENT_TYPE,
@@ -839,7 +842,7 @@ mod tests {
     #[cfg(all(feature = "blocking", feature = "rustls"))]
     #[test]
     fn sts_blocking_client_accepts_webpki_on_rustls() {
-        let client = sts_blocking_client(Duration::from_secs(1), reqx::TlsRootStore::WebPki);
+        let client = sts_blocking_client(Duration::from_secs(1), TlsRootStore::WebPki);
         assert!(client.is_ok(), "rustls should accept WebPki root store");
     }
 
@@ -847,7 +850,7 @@ mod tests {
     #[test]
     fn sts_blocking_client_accepts_webpki_on_native_tls() {
         // reqx blocking transport (ureq backend) accepts WebPki roots on native-tls.
-        let client = sts_blocking_client(Duration::from_secs(1), reqx::TlsRootStore::WebPki);
+        let client = sts_blocking_client(Duration::from_secs(1), TlsRootStore::WebPki);
         assert!(
             client.is_ok(),
             "native-tls should build with WebPki root store"

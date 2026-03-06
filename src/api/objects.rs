@@ -434,31 +434,20 @@ impl GetObjectRequest {
         let content_type =
             crate::util::headers::header_string(resp.headers(), http::header::CONTENT_TYPE);
 
-        use http_body_util::BodyExt as _;
-        let stream = futures_util::stream::unfold(
-            (resp.into_body(), false),
-            |(mut body, done)| async move {
-                if done {
-                    return None;
-                }
-                loop {
-                    match body.frame().await {
-                        Some(Ok(frame)) => {
-                            if let Some(data) = frame.data_ref() {
-                                return Some((Ok(data.clone()), (body, false)));
-                            }
-                        }
-                        Some(Err(e)) => {
-                            return Some((
-                                Err(Error::transport("body stream error", Some(Box::new(e)))),
-                                (body, true),
-                            ));
-                        }
-                        None => return None,
-                    }
-                }
-            },
-        );
+        let stream = futures_util::stream::try_unfold(resp, |mut resp| async move {
+            use tokio::io::AsyncReadExt as _;
+
+            let mut chunk = vec![0; 8192];
+            let read = resp
+                .read(&mut chunk)
+                .await
+                .map_err(|e| Error::transport("body stream error", Some(Box::new(e))))?;
+            if read == 0 {
+                return Ok(None);
+            }
+            chunk.truncate(read);
+            Ok(Some((Bytes::from(chunk), resp)))
+        });
 
         Ok(GetObjectOutput {
             body: Box::pin(stream),
