@@ -3,6 +3,10 @@
 ### 🐛 Bug Fixes
 
 - Restore no-default-features test compatibility
+
+### ⚙️ Miscellaneous Tasks
+
+- Release s3 version 0.1.20
 ## [0.1.19] - 2026-03-06
 
 ### 🐛 Bug Fixes
