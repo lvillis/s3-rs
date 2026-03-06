@@ -6,9 +6,7 @@ use url::Url;
 
 use crate::error::{Error, Result};
 
-#[cfg(feature = "async")]
-use bytes::Bytes;
-#[cfg(feature = "blocking")]
+#[cfg(any(feature = "async", feature = "blocking"))]
 use bytes::Bytes;
 #[cfg(feature = "async")]
 /// Streaming response body for async operations.

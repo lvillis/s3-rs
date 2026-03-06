@@ -176,11 +176,11 @@ impl Interceptor for TransportMetricsInterceptor {
 
 #[cfg(all(feature = "metrics", any(feature = "async", feature = "blocking")))]
 fn retry_reason_label(decision: &RetryDecision) -> &'static str {
-    if decision.status.is_some() {
+    if decision.status().is_some() {
         "status"
-    } else if decision.transport_error_kind.is_some()
-        || decision.timeout_phase.is_some()
-        || decision.response_body_read_error
+    } else if decision.transport_error_kind().is_some()
+        || decision.timeout_phase().is_some()
+        || decision.is_response_body_read_error()
     {
         "transport"
     } else {
