@@ -1,3 +1,18 @@
+## [0.1.22] - 2026-03-10
+
+### 🚜 Refactor
+
+- Unify transport flow and tighten feature gates
+- Reorganize auth and types
+
+### 📚 Documentation
+
+- Improve docs.rs experience and enforce doc quality
+## [0.1.21] - 2026-03-06
+
+### ⚙️ Miscellaneous Tasks
+
+- Release s3 version 0.1.21
 ## [0.1.20] - 2026-03-06
 
 ### 🐛 Bug Fixes
