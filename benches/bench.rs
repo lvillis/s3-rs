@@ -1,6 +1,9 @@
+#[cfg(any(feature = "async", feature = "blocking", feature = "checksums"))]
 use std::{hint::black_box, time::Duration};
 
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+#[cfg(any(feature = "async", feature = "blocking", feature = "checksums"))]
+use criterion::BenchmarkId;
+use criterion::{Criterion, criterion_group, criterion_main};
 
 #[cfg(feature = "async")]
 fn async_client(addressing: s3::AddressingStyle) -> s3::Client {

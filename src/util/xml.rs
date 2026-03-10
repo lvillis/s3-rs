@@ -1,16 +1,19 @@
 use bytes::Bytes;
 
-use crate::{error::Error, types};
+use crate::{
+    error::Error,
+    types::{self, xml},
+};
 
 const S3_XMLNS: &str = "http://s3.amazonaws.com/doc/2006-03-01/";
 
-pub(crate) fn parse_error_xml(body: &str) -> Option<types::XmlError> {
+pub(crate) fn parse_error_xml(body: &str) -> Option<xml::XmlError> {
     if body.trim().is_empty() {
         return None;
     }
 
     let fragment = extract_error_fragment(body)?;
-    let mut parsed = quick_xml::de::from_str::<types::XmlError>(fragment).ok()?;
+    let mut parsed = quick_xml::de::from_str::<xml::XmlError>(fragment).ok()?;
     if parsed.request_id.is_none() {
         parsed.request_id = extract_tag_text(body, "RequestId");
     }
@@ -48,7 +51,7 @@ fn extract_tag_text(body: &str, tag: &str) -> Option<String> {
     Some(value.to_string())
 }
 
-fn normalize_error_fields(mut error: types::XmlError) -> Option<types::XmlError> {
+fn normalize_error_fields(mut error: xml::XmlError) -> Option<xml::XmlError> {
     trim_optional_string(&mut error.code);
     trim_optional_string(&mut error.message);
     trim_optional_string(&mut error.request_id);
@@ -75,7 +78,7 @@ fn trim_optional_string(value: &mut Option<String>) {
 }
 
 pub(crate) fn parse_list_objects_v2(body: &str) -> Result<types::ListObjectsV2Output, Error> {
-    let parsed = quick_xml::de::from_str::<types::XmlListBucketResult>(body).map_err(|e| {
+    let parsed = quick_xml::de::from_str::<xml::XmlListBucketResult>(body).map_err(|e| {
         Error::decode(
             "failed to parse ListObjectsV2 XML response",
             Some(Box::new(e)),
@@ -85,26 +88,24 @@ pub(crate) fn parse_list_objects_v2(body: &str) -> Result<types::ListObjectsV2Ou
 }
 
 pub(crate) fn parse_list_buckets(body: &str) -> Result<types::ListBucketsOutput, Error> {
-    let parsed =
-        quick_xml::de::from_str::<types::XmlListAllMyBucketsResult>(body).map_err(|e| {
-            Error::decode(
-                "failed to parse ListBuckets XML response",
-                Some(Box::new(e)),
-            )
-        })?;
+    let parsed = quick_xml::de::from_str::<xml::XmlListAllMyBucketsResult>(body).map_err(|e| {
+        Error::decode(
+            "failed to parse ListBuckets XML response",
+            Some(Box::new(e)),
+        )
+    })?;
     Ok(types::ListBucketsOutput::from(parsed))
 }
 
 pub(crate) fn parse_bucket_versioning(
     body: &str,
 ) -> Result<types::BucketVersioningConfiguration, Error> {
-    let parsed =
-        quick_xml::de::from_str::<types::XmlVersioningConfiguration>(body).map_err(|e| {
-            Error::decode(
-                "failed to parse GetBucketVersioning XML response",
-                Some(Box::new(e)),
-            )
-        })?;
+    let parsed = quick_xml::de::from_str::<xml::XmlVersioningConfiguration>(body).map_err(|e| {
+        Error::decode(
+            "failed to parse GetBucketVersioning XML response",
+            Some(Box::new(e)),
+        )
+    })?;
 
     Ok(types::BucketVersioningConfiguration {
         status: parsed.status.as_deref().and_then(parse_versioning_status),
@@ -115,13 +116,12 @@ pub(crate) fn parse_bucket_versioning(
 pub(crate) fn parse_bucket_lifecycle(
     body: &str,
 ) -> Result<types::BucketLifecycleConfiguration, Error> {
-    let parsed =
-        quick_xml::de::from_str::<types::XmlLifecycleConfiguration>(body).map_err(|e| {
-            Error::decode(
-                "failed to parse GetBucketLifecycle XML response",
-                Some(Box::new(e)),
-            )
-        })?;
+    let parsed = quick_xml::de::from_str::<xml::XmlLifecycleConfiguration>(body).map_err(|e| {
+        Error::decode(
+            "failed to parse GetBucketLifecycle XML response",
+            Some(Box::new(e)),
+        )
+    })?;
 
     Ok(types::BucketLifecycleConfiguration {
         rules: parsed
@@ -157,7 +157,7 @@ pub(crate) fn parse_bucket_lifecycle(
 }
 
 pub(crate) fn parse_bucket_cors(body: &str) -> Result<types::BucketCorsConfiguration, Error> {
-    let parsed = quick_xml::de::from_str::<types::XmlCorsConfiguration>(body).map_err(|e| {
+    let parsed = quick_xml::de::from_str::<xml::XmlCorsConfiguration>(body).map_err(|e| {
         Error::decode(
             "failed to parse GetBucketCors XML response",
             Some(Box::new(e)),
@@ -185,7 +185,7 @@ pub(crate) fn parse_bucket_cors(body: &str) -> Result<types::BucketCorsConfigura
 }
 
 pub(crate) fn parse_bucket_tagging(body: &str) -> Result<types::BucketTagging, Error> {
-    let parsed = quick_xml::de::from_str::<types::XmlTagging>(body).map_err(|e| {
+    let parsed = quick_xml::de::from_str::<xml::XmlTagging>(body).map_err(|e| {
         Error::decode(
             "failed to parse GetBucketTagging XML response",
             Some(Box::new(e)),
@@ -211,7 +211,7 @@ pub(crate) fn parse_bucket_tagging(body: &str) -> Result<types::BucketTagging, E
 pub(crate) fn parse_bucket_encryption(
     body: &str,
 ) -> Result<types::BucketEncryptionConfiguration, Error> {
-    let parsed = quick_xml::de::from_str::<types::XmlServerSideEncryptionConfiguration>(body)
+    let parsed = quick_xml::de::from_str::<xml::XmlServerSideEncryptionConfiguration>(body)
         .map_err(|e| {
             Error::decode(
                 "failed to parse GetBucketEncryption XML response",
@@ -240,8 +240,8 @@ pub(crate) fn parse_bucket_encryption(
 pub(crate) fn parse_bucket_public_access_block(
     body: &str,
 ) -> Result<types::BucketPublicAccessBlockConfiguration, Error> {
-    let parsed = quick_xml::de::from_str::<types::XmlPublicAccessBlockConfiguration>(body)
-        .map_err(|e| {
+    let parsed =
+        quick_xml::de::from_str::<xml::XmlPublicAccessBlockConfiguration>(body).map_err(|e| {
             Error::decode(
                 "failed to parse GetPublicAccessBlock XML response",
                 Some(Box::new(e)),
@@ -257,7 +257,7 @@ pub(crate) fn parse_bucket_public_access_block(
 }
 
 pub(crate) fn parse_delete_objects(body: &str) -> Result<types::DeleteObjectsOutput, Error> {
-    let parsed = quick_xml::de::from_str::<types::XmlDeleteResult>(body).map_err(|e| {
+    let parsed = quick_xml::de::from_str::<xml::XmlDeleteResult>(body).map_err(|e| {
         Error::decode(
             "failed to parse DeleteObjects XML response",
             Some(Box::new(e)),
@@ -267,7 +267,7 @@ pub(crate) fn parse_delete_objects(body: &str) -> Result<types::DeleteObjectsOut
 }
 
 pub(crate) fn parse_copy_object(body: &str) -> Result<types::CopyObjectOutput, Error> {
-    let parsed = quick_xml::de::from_str::<types::XmlCopyObjectResult>(body)
+    let parsed = quick_xml::de::from_str::<xml::XmlCopyObjectResult>(body)
         .map_err(|e| Error::decode("failed to parse CopyObject XML response", Some(Box::new(e))))?;
     Ok(types::CopyObjectOutput::from(parsed))
 }
@@ -277,7 +277,7 @@ pub(crate) fn parse_create_multipart_upload(
     body: &str,
 ) -> Result<types::CreateMultipartUploadOutput, Error> {
     let parsed =
-        quick_xml::de::from_str::<types::XmlInitiateMultipartUploadResult>(body).map_err(|e| {
+        quick_xml::de::from_str::<xml::XmlInitiateMultipartUploadResult>(body).map_err(|e| {
             Error::decode(
                 "failed to parse CreateMultipartUpload XML response",
                 Some(Box::new(e)),
@@ -291,7 +291,7 @@ pub(crate) fn parse_complete_multipart_upload(
     body: &str,
 ) -> Result<types::CompleteMultipartUploadOutput, Error> {
     let parsed =
-        quick_xml::de::from_str::<types::XmlCompleteMultipartUploadResult>(body).map_err(|e| {
+        quick_xml::de::from_str::<xml::XmlCompleteMultipartUploadResult>(body).map_err(|e| {
             Error::decode(
                 "failed to parse CompleteMultipartUpload XML response",
                 Some(Box::new(e)),
@@ -302,14 +302,14 @@ pub(crate) fn parse_complete_multipart_upload(
 
 #[cfg(feature = "multipart")]
 pub(crate) fn parse_list_parts(body: &str) -> Result<types::ListPartsOutput, Error> {
-    let parsed = quick_xml::de::from_str::<types::XmlListPartsResult>(body)
+    let parsed = quick_xml::de::from_str::<xml::XmlListPartsResult>(body)
         .map_err(|e| Error::decode("failed to parse ListParts XML response", Some(Box::new(e))))?;
     Ok(types::ListPartsOutput::from(parsed))
 }
 
 #[cfg(feature = "multipart")]
 pub(crate) fn parse_upload_part_copy(body: &str) -> Result<types::UploadPartCopyOutput, Error> {
-    let parsed = quick_xml::de::from_str::<types::XmlCopyPartResult>(body).map_err(|e| {
+    let parsed = quick_xml::de::from_str::<xml::XmlCopyPartResult>(body).map_err(|e| {
         Error::decode(
             "failed to parse UploadPartCopy XML response",
             Some(Box::new(e)),
