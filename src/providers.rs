@@ -1,4 +1,13 @@
 //! Endpoint presets for common S3-compatible services.
+//!
+//! Presets only provide endpoint, region, and addressing defaults. Supply [`crate::Auth`]
+//! separately when building a client.
+//!
+//! Start with:
+//!
+//! - [`aws_s3`](crate::providers::aws_s3) or [`aws::s3`](crate::providers::aws::s3) for AWS S3
+//! - [`cloudflare_r2`](crate::providers::cloudflare_r2) for Cloudflare R2
+//! - [`minio_local`](crate::providers::minio_local) for local MinIO development
 
 use crate::{AddressingStyle, Error, Result};
 
@@ -236,6 +245,7 @@ pub fn minio_local() -> Preset {
     }
 }
 
+/// Convenience aliases and preset constructors for AWS S3 regions.
 pub mod aws {
     use super::{AwsRegion, Preset, Result, aws_s3_region};
 

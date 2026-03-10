@@ -33,6 +33,16 @@ use crate::types::{
 };
 
 /// Object operations service (blocking).
+///
+/// Created by [`BlockingClient::objects`](crate::BlockingClient::objects).
+///
+/// Start here for common object flows:
+///
+/// - [`get`](crate::api::BlockingObjectsService::get) to download object bytes
+/// - [`put`](crate::api::BlockingObjectsService::put) to upload bytes or readers
+/// - [`list_v2`](crate::api::BlockingObjectsService::list_v2) to list object keys
+/// - [`presign_get`](crate::api::BlockingObjectsService::presign_get) to build a presigned
+///   download URL
 #[derive(Clone)]
 pub struct BlockingObjectsService {
     client: BlockingClient,
@@ -352,6 +362,29 @@ impl BlockingObjectsService {
 }
 
 /// Request builder for fetching an object.
+///
+/// Created by [`BlockingObjectsService::get`](crate::api::BlockingObjectsService::get).
+///
+/// # Example
+///
+/// ```no_run
+/// # fn demo() -> Result<(), s3::Error> {
+/// use s3::{Auth, BlockingClient};
+///
+/// let client = BlockingClient::builder("https://s3.example.com")?
+///     .region("us-east-1")
+///     .auth(Auth::from_env()?)
+///     .build()?;
+///
+/// let output = client
+///     .objects()
+///     .get("my-bucket", "logs/app.log")
+///     .send()?;
+/// let bytes = output.bytes()?;
+/// # let _ = bytes;
+/// # Ok(())
+/// # }
+/// ```
 pub struct BlockingGetObjectRequest {
     client: BlockingClient,
     bucket: String,
@@ -498,6 +531,30 @@ impl BlockingHeadObjectRequest {
 }
 
 /// Request builder for uploading an object.
+///
+/// Created by [`BlockingObjectsService::put`](crate::api::BlockingObjectsService::put).
+///
+/// # Example
+///
+/// ```no_run
+/// # fn demo() -> Result<(), s3::Error> {
+/// use s3::{Auth, BlockingClient};
+///
+/// let client = BlockingClient::builder("https://s3.example.com")?
+///     .region("us-east-1")
+///     .auth(Auth::from_env()?)
+///     .build()?;
+///
+/// let output = client
+///     .objects()
+///     .put("my-bucket", "notes/hello.txt")
+///     .content_type("text/plain; charset=utf-8")
+///     .body_bytes("hello from s3-rs")
+///     .send()?;
+/// # let _ = output;
+/// # Ok(())
+/// # }
+/// ```
 pub struct BlockingPutObjectRequest {
     client: BlockingClient,
     bucket: String,
@@ -1249,6 +1306,30 @@ impl BlockingListPartsRequest {
 }
 
 /// Request builder for ListObjectsV2.
+///
+/// Created by [`BlockingObjectsService::list_v2`](crate::api::BlockingObjectsService::list_v2).
+///
+/// # Example
+///
+/// ```no_run
+/// # fn demo() -> Result<(), s3::Error> {
+/// use s3::{Auth, BlockingClient};
+///
+/// let client = BlockingClient::builder("https://s3.example.com")?
+///     .region("us-east-1")
+///     .auth(Auth::from_env()?)
+///     .build()?;
+///
+/// let page = client
+///     .objects()
+///     .list_v2("my-bucket")
+///     .prefix("logs/")
+///     .max_keys(100)
+///     .send()?;
+/// # let _ = page;
+/// # Ok(())
+/// # }
+/// ```
 pub struct BlockingListObjectsV2Request {
     client: BlockingClient,
     bucket: String,
@@ -1453,6 +1534,31 @@ impl BlockingPresignObjectRequest {
 }
 
 /// Request builder for presigned GET requests.
+///
+/// Created by [`BlockingObjectsService::presign_get`](crate::api::BlockingObjectsService::presign_get).
+///
+/// # Example
+///
+/// ```no_run
+/// # fn demo() -> Result<(), s3::Error> {
+/// use std::time::Duration;
+///
+/// use s3::{Auth, BlockingClient};
+///
+/// let client = BlockingClient::builder("https://s3.example.com")?
+///     .region("us-east-1")
+///     .auth(Auth::from_env()?)
+///     .build()?;
+///
+/// let presigned = client
+///     .objects()
+///     .presign_get("my-bucket", "reports/q1.csv")
+///     .expires_in(Duration::from_secs(300))
+///     .build()?;
+/// # let _ = presigned;
+/// # Ok(())
+/// # }
+/// ```
 pub struct BlockingPresignGetObjectRequest {
     client: BlockingClient,
     bucket: String,

@@ -31,6 +31,15 @@ use crate::types::{
 };
 
 /// Object operations service.
+///
+/// Created by [`Client::objects`](crate::Client::objects).
+///
+/// Start here for common object flows:
+///
+/// - [`get`](crate::api::ObjectsService::get) to download object bytes
+/// - [`put`](crate::api::ObjectsService::put) to upload bytes or streams
+/// - [`list_v2`](crate::api::ObjectsService::list_v2) to list object keys
+/// - [`presign_get`](crate::api::ObjectsService::presign_get) to build a presigned download URL
 #[derive(Clone)]
 pub struct ObjectsService {
     client: Client,
@@ -334,6 +343,30 @@ impl ObjectsService {
 }
 
 /// Request builder for fetching an object.
+///
+/// Created by [`ObjectsService::get`](crate::api::ObjectsService::get).
+///
+/// # Example
+///
+/// ```no_run
+/// # async fn demo() -> Result<(), s3::Error> {
+/// use s3::{Auth, Client};
+///
+/// let client = Client::builder("https://s3.example.com")?
+///     .region("us-east-1")
+///     .auth(Auth::from_env()?)
+///     .build()?;
+///
+/// let output = client
+///     .objects()
+///     .get("my-bucket", "logs/app.log")
+///     .send()
+///     .await?;
+/// let bytes = output.bytes().await?;
+/// # let _ = bytes;
+/// # Ok(())
+/// # }
+/// ```
 pub struct GetObjectRequest {
     client: Client,
     bucket: String,
@@ -499,6 +532,31 @@ impl HeadObjectRequest {
 }
 
 /// Request builder for uploading an object.
+///
+/// Created by [`ObjectsService::put`](crate::api::ObjectsService::put).
+///
+/// # Example
+///
+/// ```no_run
+/// # async fn demo() -> Result<(), s3::Error> {
+/// use s3::{Auth, Client};
+///
+/// let client = Client::builder("https://s3.example.com")?
+///     .region("us-east-1")
+///     .auth(Auth::from_env()?)
+///     .build()?;
+///
+/// let output = client
+///     .objects()
+///     .put("my-bucket", "notes/hello.txt")
+///     .content_type("text/plain; charset=utf-8")
+///     .body_bytes("hello from s3-rs")
+///     .send()
+///     .await?;
+/// # let _ = output;
+/// # Ok(())
+/// # }
+/// ```
 pub struct PutObjectRequest {
     client: Client,
     bucket: String,
@@ -1293,6 +1351,31 @@ impl ListPartsRequest {
 }
 
 /// Request builder for ListObjectsV2.
+///
+/// Created by [`ObjectsService::list_v2`](crate::api::ObjectsService::list_v2).
+///
+/// # Example
+///
+/// ```no_run
+/// # async fn demo() -> Result<(), s3::Error> {
+/// use s3::{Auth, Client};
+///
+/// let client = Client::builder("https://s3.example.com")?
+///     .region("us-east-1")
+///     .auth(Auth::from_env()?)
+///     .build()?;
+///
+/// let page = client
+///     .objects()
+///     .list_v2("my-bucket")
+///     .prefix("logs/")
+///     .max_keys(100)
+///     .send()
+///     .await?;
+/// # let _ = page;
+/// # Ok(())
+/// # }
+/// ```
 pub struct ListObjectsV2Request {
     client: Client,
     bucket: String,
@@ -1510,6 +1593,31 @@ impl PresignObjectRequest {
 }
 
 /// Request builder for presigned GET requests.
+///
+/// Created by [`ObjectsService::presign_get`](crate::api::ObjectsService::presign_get).
+///
+/// # Example
+///
+/// ```no_run
+/// # async fn demo() -> Result<(), s3::Error> {
+/// use std::time::Duration;
+///
+/// use s3::{Auth, Client};
+///
+/// let client = Client::builder("https://s3.example.com")?
+///     .region("us-east-1")
+///     .auth(Auth::from_env()?)
+///     .build()?;
+///
+/// let presigned = client
+///     .objects()
+///     .presign_get("my-bucket", "reports/q1.csv")
+///     .expires_in(Duration::from_secs(300))
+///     .build()?;
+/// # let _ = presigned;
+/// # Ok(())
+/// # }
+/// ```
 pub struct PresignGetObjectRequest {
     client: Client,
     bucket: String,

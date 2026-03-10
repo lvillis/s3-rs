@@ -22,6 +22,17 @@ use crate::{
 };
 
 /// Bucket operations service (blocking).
+///
+/// Created by [`BlockingClient::buckets`](crate::BlockingClient::buckets).
+///
+/// Start here for common bucket flows:
+///
+/// - [`list`](crate::api::BlockingBucketsService::list) to enumerate accessible buckets
+/// - [`create`](crate::api::BlockingBucketsService::create) to create a bucket
+/// - [`put_lifecycle`](crate::api::BlockingBucketsService::put_lifecycle) to manage lifecycle
+///   rules
+/// - [`put_cors`](crate::api::BlockingBucketsService::put_cors) and
+///   [`put_encryption`](crate::api::BlockingBucketsService::put_encryption) for bucket settings
 #[derive(Clone)]
 pub struct BlockingBucketsService {
     client: BlockingClient,
@@ -263,6 +274,25 @@ impl BlockingBucketsService {
 }
 
 /// Request builder for listing buckets.
+///
+/// Created by [`BlockingBucketsService::list`](crate::api::BlockingBucketsService::list).
+///
+/// # Example
+///
+/// ```no_run
+/// # fn demo() -> Result<(), s3::Error> {
+/// use s3::{Auth, BlockingClient};
+///
+/// let client = BlockingClient::builder("https://s3.example.com")?
+///     .region("us-east-1")
+///     .auth(Auth::from_env()?)
+///     .build()?;
+///
+/// let buckets = client.buckets().list().send()?;
+/// # let _ = buckets;
+/// # Ok(())
+/// # }
+/// ```
 pub struct BlockingListBucketsRequest {
     client: BlockingClient,
 }
@@ -510,6 +540,42 @@ impl BlockingGetBucketLifecycleRequest {
 }
 
 /// Request builder for updating bucket lifecycle configuration.
+///
+/// Created by [`BlockingBucketsService::put_lifecycle`](crate::api::BlockingBucketsService::put_lifecycle).
+///
+/// # Example
+///
+/// ```no_run
+/// # fn demo() -> Result<(), s3::Error> {
+/// use s3::{
+///     types::{BucketLifecycleConfiguration, BucketLifecycleRule, BucketLifecycleStatus},
+///     Auth, BlockingClient,
+/// };
+///
+/// let client = BlockingClient::builder("https://s3.example.com")?
+///     .region("us-east-1")
+///     .auth(Auth::from_env()?)
+///     .build()?;
+///
+/// let config = BucketLifecycleConfiguration {
+///     rules: vec![BucketLifecycleRule {
+///         id: Some("expire-logs".into()),
+///         status: BucketLifecycleStatus::Enabled,
+///         prefix: Some("logs/".into()),
+///         expiration_days: Some(30),
+///         expiration_date: None,
+///     }],
+/// };
+///
+/// let output = client
+///     .buckets()
+///     .put_lifecycle("my-bucket")
+///     .configuration(config)
+///     .send()?;
+/// # let _ = output;
+/// # Ok(())
+/// # }
+/// ```
 pub struct BlockingPutBucketLifecycleRequest {
     client: BlockingClient,
     bucket: String,

@@ -9,40 +9,62 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[non_exhaustive]
 pub enum Error {
     /// Invalid configuration or parameters.
-    InvalidConfig { message: String },
+    InvalidConfig {
+        /// Human-readable validation failure message.
+        message: String,
+    },
 
     /// Request signing failed.
-    Signing { message: String },
+    Signing {
+        /// Human-readable signing failure message.
+        message: String,
+    },
 
     /// Request was throttled by the service.
     RateLimited {
+        /// Suggested delay before retrying, usually derived from `Retry-After`.
         retry_after: Option<Duration>,
+        /// Service request id, when present in headers or the error payload.
         request_id: Option<String>,
+        /// Service-specific error code, when present.
         code: Option<String>,
+        /// Service-provided error message, when present.
         message: Option<String>,
+        /// Service host id, when present.
         host_id: Option<String>,
+        /// Truncated response body captured for debugging.
         body_snippet: Option<String>,
     },
 
     /// Service returned an error response.
     Api {
+        /// HTTP status returned by the service.
         status: StatusCode,
+        /// Service-specific error code, when present.
         code: Option<String>,
+        /// Service-provided error message, when present.
         message: Option<String>,
+        /// Service request id, when present in headers or the error payload.
         request_id: Option<String>,
+        /// Service host id, when present.
         host_id: Option<String>,
+        /// Truncated response body captured for debugging.
         body_snippet: Option<String>,
     },
 
     /// Transport-level failure (HTTP client, IO, TLS).
     Transport {
+        /// Human-readable transport failure message.
         message: String,
+        /// Underlying transport error, if preserved.
         source: Option<Box<dyn StdError + Send + Sync + 'static>>,
     },
 
     /// Response decode or parse failure.
     Decode {
+        /// Human-readable decode failure message.
         message: String,
+        /// Underlying decode error, if preserved.
         source: Option<Box<dyn StdError + Send + Sync + 'static>>,
     },
 }

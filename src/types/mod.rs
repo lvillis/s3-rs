@@ -1,4 +1,17 @@
-//! Shared request and response types.
+//! Public request and response types shared across operations.
+//!
+//! Callers should work with these stable domain types. Protocol-specific XML DTOs and parsing
+//! helpers live in a private submodule so the public API stays focused on S3 concepts.
+//!
+//! Common entry points in this module include:
+//!
+//! - [`GetObjectOutput`](crate::types::GetObjectOutput) and
+//!   [`BlockingGetObjectOutput`](crate::types::BlockingGetObjectOutput) for object downloads
+//! - [`ListObjectsV2Output`](crate::types::ListObjectsV2Output) and
+//!   [`Object`](crate::types::Object) for object listings
+//! - [`ListBucketsOutput`](crate::types::ListBucketsOutput) and
+//!   [`Bucket`](crate::types::Bucket) for bucket listings
+//! - [`PresignedRequest`](crate::types::PresignedRequest) for presigned URL generation
 
 use http::{HeaderMap, Method};
 use url::Url;

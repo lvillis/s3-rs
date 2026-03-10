@@ -45,6 +45,12 @@ enum BlockingRefreshWait {
 }
 
 /// Cached credentials wrapper with refresh and throttling.
+///
+/// This wrapper adds three behaviors to an underlying [`CredentialsProvider`]:
+///
+/// - caches the latest usable [`CredentialsSnapshot`]
+/// - refreshes early before expiry
+/// - coalesces concurrent refreshes so only one caller performs the refresh work
 #[cfg(any(feature = "async", feature = "blocking"))]
 #[derive(Debug)]
 pub struct CachedProvider<P> {

@@ -33,12 +33,19 @@ pub enum BlockingTlsRootStore {
 }
 
 /// Blocking S3 client.
+///
+/// This is the main blocking entry point for the crate. Build it with
+/// [`BlockingClient::builder`], then use [`BlockingClient::objects`] or
+/// [`BlockingClient::buckets`] to create typed request builders from [`crate::api`].
 #[derive(Clone)]
 pub struct BlockingClient {
     inner: Arc<Inner>,
 }
 
 /// Builder for [`BlockingClient`].
+///
+/// `region(...)` is required before calling [`BlockingClientBuilder::build`]. Authentication
+/// defaults to [`Auth::Anonymous`] until you set [`BlockingClientBuilder::auth`].
 pub struct BlockingClientBuilder {
     endpoint: Url,
     region: Option<String>,
@@ -65,11 +72,17 @@ impl BlockingClient {
     }
 
     /// Returns the objects service.
+    ///
+    /// Use this to create request builders such as [`crate::api::BlockingGetObjectRequest`] and
+    /// [`crate::api::BlockingPutObjectRequest`].
     pub fn objects(&self) -> api::BlockingObjectsService {
         api::BlockingObjectsService::new(self.clone())
     }
 
     /// Returns the buckets service.
+    ///
+    /// Use this to create request builders such as [`crate::api::BlockingListBucketsRequest`] and
+    /// [`crate::api::BlockingPutBucketLifecycleRequest`].
     pub fn buckets(&self) -> api::BlockingBucketsService {
         api::BlockingBucketsService::new(self.clone())
     }

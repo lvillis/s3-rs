@@ -33,12 +33,18 @@ pub enum AsyncTlsRootStore {
 }
 
 /// Async S3 client.
+///
+/// This is the main async entry point for the crate. Build it with [`Client::builder`], then use
+/// [`Client::objects`] or [`Client::buckets`] to create typed request builders from [`crate::api`].
 #[derive(Clone)]
 pub struct Client {
     inner: Arc<Inner>,
 }
 
 /// Builder for [`Client`].
+///
+/// `region(...)` is required before calling [`ClientBuilder::build`]. Authentication defaults to
+/// [`Auth::Anonymous`] until you set [`ClientBuilder::auth`].
 pub struct ClientBuilder {
     endpoint: Url,
     region: Option<String>,
@@ -65,11 +71,17 @@ impl Client {
     }
 
     /// Returns the objects service.
+    ///
+    /// Use this to create request builders such as [`crate::api::GetObjectRequest`] and
+    /// [`crate::api::PutObjectRequest`].
     pub fn objects(&self) -> api::ObjectsService {
         api::ObjectsService::new(self.clone())
     }
 
     /// Returns the buckets service.
+    ///
+    /// Use this to create request builders such as [`crate::api::ListBucketsRequest`] and
+    /// [`crate::api::PutBucketLifecycleRequest`].
     pub fn buckets(&self) -> api::BucketsService {
         api::BucketsService::new(self.clone())
     }

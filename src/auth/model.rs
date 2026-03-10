@@ -144,6 +144,14 @@ impl fmt::Debug for Credentials {
 }
 
 /// Authentication configuration for requests.
+///
+/// Most applications use one of the constructor helpers on [`Auth`]:
+///
+/// - [`Auth::from_env`] for static credentials from environment variables
+/// - [`Auth::provider`] for a custom refreshable provider
+/// - [`Auth::Anonymous`] for unsigned requests
+///
+/// Optional credential features also add profile, IMDS, and STS-based constructors.
 #[non_exhaustive]
 #[derive(Clone, Debug)]
 pub enum Auth {

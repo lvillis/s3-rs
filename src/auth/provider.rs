@@ -26,6 +26,10 @@ pub type CredentialsFuture<'a> =
     Pin<Box<dyn Future<Output = Result<CredentialsSnapshot>> + Send + 'a>>;
 
 /// Source of credential snapshots for request signing.
+///
+/// Implement this trait when credentials may rotate over time. If the underlying provider performs
+/// network calls or expensive refreshes, wrap it in [`crate::CachedProvider`] so multiple requests
+/// can share cached credentials and coalesce refresh work.
 pub trait CredentialsProvider: std::fmt::Debug + Send + Sync {
     /// Returns credentials asynchronously.
     #[cfg(feature = "async")]

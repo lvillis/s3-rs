@@ -21,6 +21,16 @@ use crate::{
 };
 
 /// Bucket operations service.
+///
+/// Created by [`Client::buckets`](crate::Client::buckets).
+///
+/// Start here for common bucket flows:
+///
+/// - [`list`](crate::api::BucketsService::list) to enumerate accessible buckets
+/// - [`create`](crate::api::BucketsService::create) to create a bucket
+/// - [`put_lifecycle`](crate::api::BucketsService::put_lifecycle) to manage lifecycle rules
+/// - [`put_cors`](crate::api::BucketsService::put_cors) and
+///   [`put_encryption`](crate::api::BucketsService::put_encryption) for bucket settings
 #[derive(Clone)]
 pub struct BucketsService {
     client: Client,
@@ -256,6 +266,25 @@ impl BucketsService {
 }
 
 /// Request builder for listing buckets.
+///
+/// Created by [`BucketsService::list`](crate::api::BucketsService::list).
+///
+/// # Example
+///
+/// ```no_run
+/// # async fn demo() -> Result<(), s3::Error> {
+/// use s3::{Auth, Client};
+///
+/// let client = Client::builder("https://s3.example.com")?
+///     .region("us-east-1")
+///     .auth(Auth::from_env()?)
+///     .build()?;
+///
+/// let buckets = client.buckets().list().send().await?;
+/// # let _ = buckets;
+/// # Ok(())
+/// # }
+/// ```
 pub struct ListBucketsRequest {
     client: Client,
 }
@@ -516,6 +545,43 @@ impl GetBucketLifecycleRequest {
 }
 
 /// Request builder for updating bucket lifecycle configuration.
+///
+/// Created by [`BucketsService::put_lifecycle`](crate::api::BucketsService::put_lifecycle).
+///
+/// # Example
+///
+/// ```no_run
+/// # async fn demo() -> Result<(), s3::Error> {
+/// use s3::{
+///     types::{BucketLifecycleConfiguration, BucketLifecycleRule, BucketLifecycleStatus},
+///     Auth, Client,
+/// };
+///
+/// let client = Client::builder("https://s3.example.com")?
+///     .region("us-east-1")
+///     .auth(Auth::from_env()?)
+///     .build()?;
+///
+/// let config = BucketLifecycleConfiguration {
+///     rules: vec![BucketLifecycleRule {
+///         id: Some("expire-logs".into()),
+///         status: BucketLifecycleStatus::Enabled,
+///         prefix: Some("logs/".into()),
+///         expiration_days: Some(30),
+///         expiration_date: None,
+///     }],
+/// };
+///
+/// let output = client
+///     .buckets()
+///     .put_lifecycle("my-bucket")
+///     .configuration(config)
+///     .send()
+///     .await?;
+/// # let _ = output;
+/// # Ok(())
+/// # }
+/// ```
 pub struct PutBucketLifecycleRequest {
     client: Client,
     bucket: String,

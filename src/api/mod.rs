@@ -1,4 +1,27 @@
 //! Service entry points and request builders.
+//!
+//! Client instances expose `objects()` and `buckets()` services from this module. Request
+//! builders live here; shared request and response models live in [`crate::types`].
+//!
+//! ## Start here
+//!
+//! Async clients usually begin with:
+//!
+//! - [`crate::Client::objects`] -> [`ObjectsService`](crate::api::ObjectsService)
+//! - [`crate::Client::buckets`] -> [`BucketsService`](crate::api::BucketsService)
+//!
+//! Blocking clients usually begin with:
+//!
+//! - [`crate::BlockingClient::objects`] ->
+//!   [`BlockingObjectsService`](crate::api::BlockingObjectsService)
+//! - [`crate::BlockingClient::buckets`] ->
+//!   [`BlockingBucketsService`](crate::api::BlockingBucketsService)
+//!
+//! Each service returns typed request builders such as
+//! [`GetObjectRequest`](crate::api::GetObjectRequest),
+//! [`PutObjectRequest`](crate::api::PutObjectRequest),
+//! [`ListObjectsV2Request`](crate::api::ListObjectsV2Request), and
+//! [`PutBucketLifecycleRequest`](crate::api::PutBucketLifecycleRequest).
 
 #[cfg(feature = "blocking")]
 mod blocking_buckets;

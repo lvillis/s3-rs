@@ -1,4 +1,28 @@
-//! A lean S3 client for Rust.
+//! Lean, modern, unofficial S3-compatible client for Rust.
+//!
+//! ## Start here
+//!
+//! If you are new to the crate, read these items in this order:
+//!
+//! - [`Client`] for the async entry point
+//! - [`BlockingClient`] for the blocking entry point
+//! - [`Auth`] for signing strategy and credential loading
+//! - [`api`] for request builders exposed from `objects()` and `buckets()`
+//! - [`types`] for public request and response models
+//! - [`providers`] for endpoint presets such as AWS, MinIO, and Cloudflare R2
+//!
+//! ## Mental model
+//!
+//! Most applications follow the same flow:
+//!
+//! - [`Auth`] chooses how requests are signed.
+//! - `Client::builder(...)` and `BlockingClient::builder(...)` capture endpoint, region, retry,
+//!   TLS, and addressing policy.
+//! - `client.objects()` and `client.buckets()` produce typed request builders for object and
+//!   bucket operations.
+//! - [`types`] contains the public request and response models you work with. Protocol XML mapping
+//!   stays internal.
+//! - Optional `providers` presets bootstrap common S3-compatible endpoints.
 //!
 //! ## Quick start (async)
 //!
@@ -42,10 +66,28 @@
 //! # }
 //! ```
 //!
-//! ## Design
+//! ## Common tasks
 //!
-//! See README for product intent and usage.
+//! - Download an object: [`api::GetObjectRequest`]
+//! - Upload an object: [`api::PutObjectRequest`]
+//! - List objects: [`api::ListObjectsV2Request`]
+//! - Presign a request: [`api::PresignGetObjectRequest`] or [`types::PresignedRequest`]
+//! - List buckets: [`api::ListBucketsRequest`]
+//! - Manage bucket settings: [`api::PutBucketLifecycleRequest`], [`api::PutBucketCorsRequest`],
+//!   [`api::PutBucketTaggingRequest`], [`api::PutBucketEncryptionRequest`]
+//!
+//! ## Feature visibility
+//!
+//! Docs.rs builds this crate with all features enabled. Feature-gated items are labeled on their
+//! docs pages so you can tell whether an API requires `async`, `blocking`, `providers`,
+//! `multipart`, or one of the optional credential features.
+//!
+//! ## Examples and docs
+//!
+//! See the README and `examples/README.md` for a usage guide organized around auth, client
+//! builders, object and bucket services, TLS policy, and blocking variants.
 
+#![cfg_attr(docsrs, feature(doc_auto_cfg, doc_cfg))]
 #![allow(clippy::result_large_err)]
 
 #[cfg(all(

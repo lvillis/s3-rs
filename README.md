@@ -30,7 +30,20 @@ cargo add s3 --no-default-features --features blocking,rustls
 cargo add s3 --no-default-features --features async,native-tls
 ```
 
+## Mental model
+
+Most applications only touch a small set of layers:
+
+- `Auth` decides how requests are signed: anonymous, env credentials, a custom provider, or optional IMDS/STS/profile flows
+- `Client::builder(...)` / `BlockingClient::builder(...)` capture endpoint, region, retry, TLS, and addressing policy once
+- `client.objects()` and `client.buckets()` return typed request builders for object and bucket operations
+- `s3::types` contains the public request/response models you work with; protocol XML DTOs stay internal
+- `s3::providers` offers endpoint presets for common S3-compatible services when enabled
+
 ## Usage
+
+Most code follows the same flow: choose `Auth`, build a client, then use `objects()` or
+`buckets()` to send requests and consume public output types from `s3::types`.
 
 ### Async
 
@@ -90,6 +103,30 @@ let client = Client::builder("https://s3.example.com")?
 # }
 ```
 
+### Operation services
+
+```rust,no_run
+use s3::{Auth, Client};
+
+# async fn demo() -> Result<(), s3::Error> {
+let client = Client::builder("https://s3.example.com")?
+    .region("us-east-1")
+    .auth(Auth::from_env()?)
+    .build()?;
+
+let buckets = client.buckets().list().send().await?;
+let objects = client
+    .objects()
+    .list_v2("my-bucket")
+    .prefix("logs/")
+    .send()
+    .await?;
+
+println!("{} buckets, {} objects", buckets.buckets.len(), objects.contents.len());
+# Ok(())
+# }
+```
+
 ### Presign
 
 ```rust,no_run
@@ -126,7 +163,10 @@ let client = preset
 # }
 ```
 
-## Authentication
+## Authentication and credentials
+
+Use `Auth` as the single entry point for signing strategy. Static credentials, refreshable
+providers, and optional cloud credential flows all feed the same client builder API.
 
 - `Auth::Anonymous`: unsigned requests (for public buckets / anonymous endpoints)
 - `Auth::from_env()`: static credentials from env vars
@@ -150,11 +190,38 @@ let client = preset
 
 ## Examples
 
-- Basic put/get/delete: `examples/async_put_get_delete.rs`
-- Streaming upload (requires Content-Length): `examples/async_put_stream.rs`
+Examples follow the same layering as the crate docs: choose `Auth`, build a client, then work
+through `objects()` or `buckets()`.
+
+### Core object and bucket flows
+
+- Basic object lifecycle: `examples/async_put_get_delete.rs`
+- List buckets: `examples/async_list_buckets.rs`
 - List objects v2 + pagination: `examples/async_list_objects.rs`
+- Batch delete: `examples/async_delete_objects_batch.rs`
+- Copy object + replace metadata: `examples/async_copy_object.rs`
+- Streaming upload (requires Content-Length): `examples/async_put_stream.rs`
 - Multipart upload (feature = `multipart`): `examples/async_multipart_upload.rs`
-- Presign: `examples/presign_get.rs`, `examples/async_presign_build_async.rs`
-- TLS root policy: `examples/async_tls_root_store.rs`, `examples/blocking_tls_root_store.rs`
-- Blocking: `examples/blocking_put_get_delete.rs`
-- More: `examples/README.md`
+
+### Auth, presign, and endpoint presets
+
+- Presign with static credentials: `examples/presign_get.rs`
+- Presign with a refreshable provider: `examples/async_presign_build_async.rs`
+- IMDS credentials (feature = `credentials-imds`): `examples/async_auth_imds.rs`
+- Web identity credentials (feature = `credentials-sts`): `examples/async_auth_web_identity.rs`
+- MinIO local preset (feature = `providers`): `examples/minio_local_put_get_delete.rs`
+- Cloudflare R2 preset (feature = `providers`): `examples/r2_put_get_delete.rs`
+
+### TLS and blocking flows
+
+- Async request TLS root policy: `examples/async_tls_root_store.rs`
+- Blocking request TLS root policy: `examples/blocking_tls_root_store.rs`
+- Blocking object lifecycle: `examples/blocking_put_get_delete.rs`
+- Blocking list buckets: `examples/blocking_list_buckets.rs`
+- Blocking presign: `examples/blocking_presign_get.rs`
+
+See `examples/README.md` for environment variables and feature requirements.
+
+## Development
+
+Run `just ci` after local changes to validate formatting, feature combinations, tests, and clippy.
