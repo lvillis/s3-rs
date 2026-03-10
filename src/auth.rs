@@ -1,9 +1,11 @@
-use std::{fmt, sync::Arc, time::Duration};
+use std::{fmt, sync::Arc};
 
 #[cfg(all(feature = "blocking", not(feature = "async")))]
 use std::sync::Condvar;
-#[cfg(not(feature = "async"))]
+#[cfg(all(not(feature = "async"), feature = "blocking"))]
 use std::sync::Mutex;
+#[cfg(any(feature = "async", feature = "blocking"))]
+use std::time::Duration;
 #[cfg(feature = "async")]
 use std::{future::Future, pin::Pin};
 
@@ -213,6 +215,7 @@ impl CredentialsProvider for StsWebIdentityProvider {
     }
 }
 
+#[cfg(any(feature = "async", feature = "blocking"))]
 #[derive(Debug)]
 struct CachedState {
     cached: Option<CredentialsSnapshot>,
@@ -220,12 +223,30 @@ struct CachedState {
     last_refresh_attempt: Option<std::time::Instant>,
 }
 
+#[cfg(any(feature = "async", feature = "blocking"))]
+enum RefreshDecision {
+    UseCached(CredentialsSnapshot),
+    Wait,
+    Refresh {
+        fallback: Option<CredentialsSnapshot>,
+    },
+}
+
 #[cfg(feature = "async")]
 type CachedStateLock = tokio::sync::Mutex<CachedState>;
-#[cfg(not(feature = "async"))]
+#[cfg(all(not(feature = "async"), any(feature = "blocking")))]
 type CachedStateLock = Mutex<CachedState>;
 
+#[cfg(feature = "blocking")]
+enum BlockingRefreshWait {
+    #[cfg(all(feature = "blocking", not(feature = "async")))]
+    Condvar,
+    #[cfg(all(feature = "blocking", feature = "async"))]
+    Epoch(u64),
+}
+
 /// Cached credentials wrapper with refresh and throttling.
+#[cfg(any(feature = "async", feature = "blocking"))]
 #[derive(Debug)]
 pub struct CachedProvider<P> {
     inner: P,
@@ -242,6 +263,7 @@ pub struct CachedProvider<P> {
     refresh_condvar: std::sync::Condvar,
 }
 
+#[cfg(any(feature = "async", feature = "blocking"))]
 impl<P> CachedProvider<P>
 where
     P: CredentialsProvider,
@@ -282,20 +304,7 @@ where
 
     /// Seeds the cache with an initial snapshot.
     pub fn with_initial(self, snapshot: CredentialsSnapshot) -> Self {
-        #[cfg(feature = "async")]
-        {
-            let mut state = self
-                .state
-                .try_lock()
-                .expect("cache state must be unlocked during initialization");
-            state.cached = Some(snapshot);
-        }
-        #[cfg(not(feature = "async"))]
-        {
-            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-            state.cached = Some(snapshot);
-            drop(state);
-        }
+        self.set_initial_snapshot(snapshot);
         self
     }
 
@@ -309,6 +318,21 @@ where
     #[cfg(feature = "blocking")]
     pub fn force_refresh_blocking(&self) -> Result<CredentialsSnapshot> {
         self.get_blocking(true)
+    }
+
+    #[cfg(feature = "async")]
+    fn set_initial_snapshot(&self, snapshot: CredentialsSnapshot) {
+        let mut state = self
+            .state
+            .try_lock()
+            .expect("cache state must be unlocked during initialization");
+        state.cached = Some(snapshot);
+    }
+
+    #[cfg(all(feature = "blocking", not(feature = "async")))]
+    fn set_initial_snapshot(&self, snapshot: CredentialsSnapshot) {
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        state.cached = Some(snapshot);
     }
 
     fn should_refresh(
@@ -360,6 +384,127 @@ where
         )
     }
 
+    fn begin_refresh(
+        &self,
+        state: &mut CachedState,
+        now_utc: OffsetDateTime,
+        now: std::time::Instant,
+        force: bool,
+    ) -> Result<RefreshDecision> {
+        if let Some(cached) = state.cached.as_ref() {
+            if !self.should_refresh(cached, now_utc, force) {
+                return Ok(RefreshDecision::UseCached(cached.clone()));
+            }
+
+            if !force && !Self::is_expired(cached, now_utc) && !self.can_attempt_refresh(state, now)
+            {
+                return Ok(RefreshDecision::UseCached(cached.clone()));
+            }
+        }
+
+        if state.refreshing {
+            return Ok(RefreshDecision::Wait);
+        }
+
+        let has_usable_fallback = state
+            .cached
+            .as_ref()
+            .is_some_and(|cached| !Self::is_expired(cached, now_utc));
+        if !force
+            && !has_usable_fallback
+            && let Some(retry_after) = self.refresh_throttle_remaining(state, now)
+        {
+            return Err(Self::throttled_refresh_error(retry_after));
+        }
+
+        state.refreshing = true;
+        state.last_refresh_attempt = Some(now);
+        Ok(RefreshDecision::Refresh {
+            fallback: state.cached.clone(),
+        })
+    }
+
+    fn finish_refresh_state(
+        state: &mut CachedState,
+        fallback: Option<CredentialsSnapshot>,
+        refreshed: Result<CredentialsSnapshot>,
+    ) -> Result<CredentialsSnapshot> {
+        state.refreshing = false;
+
+        match refreshed {
+            Ok(snapshot) => {
+                state.cached = Some(snapshot.clone());
+                Ok(snapshot)
+            }
+            Err(err) => {
+                let fallback_now = OffsetDateTime::now_utc();
+                if let Some(snapshot) = fallback.filter(|s| !Self::is_expired(s, fallback_now)) {
+                    return Ok(snapshot);
+                }
+                Err(err)
+            }
+        }
+    }
+
+    fn notify_refresh_waiters(&self) {
+        #[cfg(feature = "async")]
+        self.notify.notify_waiters();
+
+        #[cfg(all(feature = "blocking", feature = "async"))]
+        self.notify_blocking_refresh_waiters();
+
+        #[cfg(all(feature = "blocking", not(feature = "async")))]
+        self.condvar.notify_all();
+    }
+
+    #[cfg(all(feature = "blocking", not(feature = "async")))]
+    fn with_blocking_state<R>(&self, f: impl FnOnce(&mut CachedState) -> R) -> R {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        f(&mut state)
+    }
+
+    #[cfg(all(feature = "blocking", feature = "async"))]
+    fn with_blocking_state<R>(&self, f: impl FnOnce(&mut CachedState) -> R) -> R {
+        let mut state = self.state.blocking_lock();
+        f(&mut state)
+    }
+
+    #[cfg(all(feature = "blocking", not(feature = "async")))]
+    fn current_blocking_refresh_wait(&self) -> BlockingRefreshWait {
+        BlockingRefreshWait::Condvar
+    }
+
+    #[cfg(all(feature = "blocking", feature = "async"))]
+    fn current_blocking_refresh_wait(&self) -> BlockingRefreshWait {
+        BlockingRefreshWait::Epoch(self.observed_refresh_epoch())
+    }
+
+    #[cfg(all(feature = "blocking", not(feature = "async")))]
+    fn wait_for_blocking_refresh(&self, _wait: BlockingRefreshWait) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        while state.refreshing {
+            state = self
+                .condvar
+                .wait(state)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+    }
+
+    #[cfg(all(feature = "blocking", feature = "async"))]
+    fn wait_for_blocking_refresh(&self, wait: BlockingRefreshWait) {
+        match wait {
+            BlockingRefreshWait::Epoch(observed_epoch) => {
+                self.wait_for_refresh_epoch_change(observed_epoch);
+            }
+        }
+    }
+
     #[cfg(all(feature = "blocking", feature = "async"))]
     fn observed_refresh_epoch(&self) -> u64 {
         *self
@@ -392,162 +537,48 @@ where
         self.refresh_condvar.notify_all();
     }
 
-    #[cfg(all(feature = "blocking", not(feature = "async")))]
+    #[cfg(feature = "blocking")]
     fn get_blocking(&self, force: bool) -> Result<CredentialsSnapshot> {
         use std::time::Instant;
 
-        loop {
-            let now_utc = OffsetDateTime::now_utc();
-            let (fallback, should_refresh, wait) = {
-                let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-
-                if let Some(cached) = state.cached.as_ref() {
-                    if !self.should_refresh(cached, now_utc, force) {
-                        return Ok(cached.clone());
-                    }
-
-                    if !force
-                        && !Self::is_expired(cached, now_utc)
-                        && !self.can_attempt_refresh(&state, Instant::now())
-                    {
-                        return Ok(cached.clone());
-                    }
-                }
-
-                if state.refreshing {
-                    (state.cached.clone(), false, true)
-                } else {
-                    let has_usable_fallback = state
-                        .cached
-                        .as_ref()
-                        .is_some_and(|cached| !Self::is_expired(cached, now_utc));
-                    if !force
-                        && !has_usable_fallback
-                        && let Some(retry_after) =
-                            self.refresh_throttle_remaining(&state, Instant::now())
-                    {
-                        return Err(Self::throttled_refresh_error(retry_after));
-                    }
-                    state.refreshing = true;
-                    state.last_refresh_attempt = Some(Instant::now());
-                    (state.cached.clone(), true, false)
-                }
-            };
-
-            if wait {
-                let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-                while state.refreshing {
-                    state = self.condvar.wait(state).unwrap_or_else(|p| p.into_inner());
-                }
-                continue;
-            }
-
-            if !should_refresh {
-                continue;
-            }
-
-            let refreshed = self.inner.credentials_blocking();
-
-            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-            state.refreshing = false;
-            match refreshed {
-                Ok(snapshot) => {
-                    state.cached = Some(snapshot.clone());
-                    drop(state);
-                    self.condvar.notify_all();
-                    return Ok(snapshot);
-                }
-                Err(err) => {
-                    let fallback_now = OffsetDateTime::now_utc();
-                    let fallback = fallback.filter(|s| !Self::is_expired(s, fallback_now));
-                    drop(state);
-                    self.condvar.notify_all();
-                    if let Some(snapshot) = fallback {
-                        return Ok(snapshot);
-                    }
-                    return Err(err);
-                }
-            }
+        enum BlockingDecision {
+            UseCached(CredentialsSnapshot),
+            Wait(BlockingRefreshWait),
+            Refresh {
+                fallback: Option<CredentialsSnapshot>,
+            },
         }
-    }
-
-    #[cfg(all(feature = "blocking", feature = "async"))]
-    fn get_blocking(&self, force: bool) -> Result<CredentialsSnapshot> {
-        use std::time::Instant;
 
         loop {
             let now_utc = OffsetDateTime::now_utc();
-            let (fallback, should_refresh, wait_epoch) = {
-                let mut state = self.state.blocking_lock();
-
-                if let Some(cached) = state.cached.as_ref() {
-                    if !self.should_refresh(cached, now_utc, force) {
-                        return Ok(cached.clone());
+            let decision = self.with_blocking_state(|state| {
+                match self.begin_refresh(state, now_utc, Instant::now(), force) {
+                    Ok(RefreshDecision::UseCached(snapshot)) => {
+                        Ok(BlockingDecision::UseCached(snapshot))
                     }
-
-                    if !force
-                        && !Self::is_expired(cached, now_utc)
-                        && !self.can_attempt_refresh(&state, Instant::now())
-                    {
-                        return Ok(cached.clone());
+                    Ok(RefreshDecision::Wait) => {
+                        Ok(BlockingDecision::Wait(self.current_blocking_refresh_wait()))
                     }
+                    Ok(RefreshDecision::Refresh { fallback }) => {
+                        Ok(BlockingDecision::Refresh { fallback })
+                    }
+                    Err(err) => Err(err),
                 }
+            })?;
 
-                if state.refreshing {
-                    (
-                        state.cached.clone(),
-                        false,
-                        Some(self.observed_refresh_epoch()),
-                    )
-                } else {
-                    let has_usable_fallback = state
-                        .cached
-                        .as_ref()
-                        .is_some_and(|cached| !Self::is_expired(cached, now_utc));
-                    if !force
-                        && !has_usable_fallback
-                        && let Some(retry_after) =
-                            self.refresh_throttle_remaining(&state, Instant::now())
-                    {
-                        return Err(Self::throttled_refresh_error(retry_after));
-                    }
-                    state.refreshing = true;
-                    state.last_refresh_attempt = Some(Instant::now());
-                    (state.cached.clone(), true, None)
+            match decision {
+                BlockingDecision::UseCached(snapshot) => return Ok(snapshot),
+                BlockingDecision::Wait(wait) => {
+                    self.wait_for_blocking_refresh(wait);
+                    continue;
                 }
-            };
-
-            if let Some(observed_epoch) = wait_epoch {
-                self.wait_for_refresh_epoch_change(observed_epoch);
-                continue;
-            }
-
-            if !should_refresh {
-                continue;
-            }
-
-            let refreshed = self.inner.credentials_blocking();
-
-            let mut state = self.state.blocking_lock();
-            state.refreshing = false;
-            match refreshed {
-                Ok(snapshot) => {
-                    state.cached = Some(snapshot.clone());
-                    drop(state);
-                    self.notify.notify_waiters();
-                    self.notify_blocking_refresh_waiters();
-                    return Ok(snapshot);
-                }
-                Err(err) => {
-                    let fallback_now = OffsetDateTime::now_utc();
-                    let fallback = fallback.filter(|s| !Self::is_expired(s, fallback_now));
-                    drop(state);
-                    self.notify.notify_waiters();
-                    self.notify_blocking_refresh_waiters();
-                    if let Some(snapshot) = fallback {
-                        return Ok(snapshot);
-                    }
-                    return Err(err);
+                BlockingDecision::Refresh { fallback } => {
+                    let refreshed = self.inner.credentials_blocking();
+                    let result = self.with_blocking_state(|state| {
+                        Self::finish_refresh_state(state, fallback, refreshed)
+                    });
+                    self.notify_refresh_waiters();
+                    return result;
                 }
             }
         }
@@ -559,40 +590,19 @@ where
 
         loop {
             let now_utc = OffsetDateTime::now_utc();
-            let (fallback, notified) = {
+            let mut fallback = None;
+            let notified = {
                 let mut state = self.state.lock().await;
 
-                if let Some(cached) = state.cached.as_ref() {
-                    if !self.should_refresh(cached, now_utc, force) {
-                        return Ok(cached.clone());
+                match self.begin_refresh(&mut state, now_utc, Instant::now(), force)? {
+                    RefreshDecision::UseCached(snapshot) => return Ok(snapshot),
+                    RefreshDecision::Wait => Some(self.notify.notified()),
+                    RefreshDecision::Refresh {
+                        fallback: refresh_fallback,
+                    } => {
+                        fallback = refresh_fallback;
+                        None
                     }
-
-                    if !force
-                        && !Self::is_expired(cached, now_utc)
-                        && !self.can_attempt_refresh(&state, Instant::now())
-                    {
-                        return Ok(cached.clone());
-                    }
-                }
-
-                if state.refreshing {
-                    let notified = self.notify.notified();
-                    (state.cached.clone(), Some(notified))
-                } else {
-                    let has_usable_fallback = state
-                        .cached
-                        .as_ref()
-                        .is_some_and(|cached| !Self::is_expired(cached, now_utc));
-                    if !force
-                        && !has_usable_fallback
-                        && let Some(retry_after) =
-                            self.refresh_throttle_remaining(&state, Instant::now())
-                    {
-                        return Err(Self::throttled_refresh_error(retry_after));
-                    }
-                    state.refreshing = true;
-                    state.last_refresh_attempt = Some(Instant::now());
-                    (state.cached.clone(), None)
                 }
             };
 
@@ -604,33 +614,15 @@ where
             let refreshed = self.inner.credentials_async().await;
 
             let mut state = self.state.lock().await;
-            state.refreshing = false;
-            match refreshed {
-                Ok(snapshot) => {
-                    state.cached = Some(snapshot.clone());
-                    drop(state);
-                    self.notify.notify_waiters();
-                    #[cfg(all(feature = "blocking", feature = "async"))]
-                    self.notify_blocking_refresh_waiters();
-                    return Ok(snapshot);
-                }
-                Err(err) => {
-                    let fallback_now = OffsetDateTime::now_utc();
-                    let fallback = fallback.filter(|s| !Self::is_expired(s, fallback_now));
-                    drop(state);
-                    self.notify.notify_waiters();
-                    #[cfg(all(feature = "blocking", feature = "async"))]
-                    self.notify_blocking_refresh_waiters();
-                    if let Some(snapshot) = fallback {
-                        return Ok(snapshot);
-                    }
-                    return Err(err);
-                }
-            }
+            let result = Self::finish_refresh_state(&mut state, fallback, refreshed);
+            drop(state);
+            self.notify_refresh_waiters();
+            return result;
         }
     }
 }
 
+#[cfg(any(feature = "async", feature = "blocking"))]
 impl<P> CredentialsProvider for CachedProvider<P>
 where
     P: CredentialsProvider,
@@ -1062,10 +1054,12 @@ mod tests {
     use std::sync::Condvar;
     #[cfg(any(feature = "async", feature = "blocking"))]
     use std::sync::Mutex;
-
+    #[cfg(any(feature = "async", feature = "blocking"))]
     use std::sync::atomic::AtomicUsize;
     #[cfg(any(feature = "async", feature = "blocking"))]
     use std::sync::atomic::Ordering;
+    #[cfg(any(feature = "async", feature = "blocking"))]
+    use std::time::Duration;
 
     use super::*;
 
@@ -1112,11 +1106,13 @@ mod tests {
         );
     }
 
+    #[cfg(any(feature = "async", feature = "blocking"))]
     #[derive(Debug)]
     struct CountingFailProvider {
         calls: Arc<AtomicUsize>,
     }
 
+    #[cfg(any(feature = "async", feature = "blocking"))]
     impl CredentialsProvider for CountingFailProvider {
         #[cfg(feature = "async")]
         fn credentials_async(&self) -> CredentialsFuture<'_> {
@@ -1134,11 +1130,13 @@ mod tests {
         }
     }
 
+    #[cfg(any(feature = "async", feature = "blocking"))]
     #[derive(Debug)]
     struct DelayedFailProvider {
         delay: Duration,
     }
 
+    #[cfg(any(feature = "async", feature = "blocking"))]
     impl CredentialsProvider for DelayedFailProvider {
         #[cfg(feature = "async")]
         fn credentials_async(&self) -> CredentialsFuture<'_> {
@@ -1156,12 +1154,14 @@ mod tests {
         }
     }
 
+    #[cfg(any(feature = "async", feature = "blocking"))]
     #[derive(Debug)]
     struct CountingOkProvider {
         calls: Arc<AtomicUsize>,
         expires_in: time::Duration,
     }
 
+    #[cfg(any(feature = "async", feature = "blocking"))]
     impl CountingOkProvider {
         fn new(calls: Arc<AtomicUsize>) -> Self {
             Self {
@@ -1171,6 +1171,7 @@ mod tests {
         }
     }
 
+    #[cfg(any(feature = "async", feature = "blocking"))]
     impl CredentialsProvider for CountingOkProvider {
         #[cfg(feature = "async")]
         fn credentials_async(&self) -> CredentialsFuture<'_> {

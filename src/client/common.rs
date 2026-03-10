@@ -1,15 +1,19 @@
 use std::time::Duration;
 
-use http::{HeaderMap, Method};
 use time::OffsetDateTime;
 use url::Url;
 
-use crate::{
-    auth::{CredentialsSnapshot, Region},
-    error::{Error, Result},
-    util,
-};
+#[cfg(any(feature = "async", feature = "blocking"))]
+use http::{HeaderMap, Method};
 
+use crate::{
+    auth::CredentialsSnapshot,
+    error::{Error, Result},
+};
+#[cfg(any(feature = "async", feature = "blocking"))]
+use crate::{auth::Region, util};
+
+#[cfg(any(feature = "async", feature = "blocking"))]
 pub(crate) fn sign_with_snapshot(
     method: &Method,
     resolved: &crate::util::url::ResolvedUrl,

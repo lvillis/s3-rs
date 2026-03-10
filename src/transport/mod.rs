@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-#[cfg(any(test, feature = "tracing", feature = "async", feature = "blocking"))]
+#[cfg(any(feature = "tracing", feature = "async", feature = "blocking"))]
 const REDACTED_HOST: &str = "<redacted-host>";
 
 #[cfg(feature = "async")]
@@ -16,15 +16,9 @@ pub(crate) mod blocking_transport;
 
 #[cfg(all(feature = "metrics", any(feature = "async", feature = "blocking")))]
 use http::HeaderMap;
-#[cfg(any(
-    test,
-    all(feature = "metrics", any(feature = "async", feature = "blocking"))
-))]
+#[cfg(any(feature = "async", feature = "blocking"))]
 use http::Method;
-#[cfg(any(
-    test,
-    all(feature = "metrics", any(feature = "async", feature = "blocking"))
-))]
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 use http::StatusCode;
 #[cfg(all(feature = "metrics", any(feature = "async", feature = "blocking")))]
 use reqx::{
@@ -36,7 +30,7 @@ use reqx::{
     advanced::{BackoffSource, TlsBackend},
     prelude::RetryPolicy,
 };
-#[cfg(any(test, feature = "tracing", feature = "async", feature = "blocking"))]
+#[cfg(any(feature = "tracing", feature = "async", feature = "blocking"))]
 use url::Url;
 
 #[derive(Clone, Copy, Debug)]
@@ -56,6 +50,81 @@ impl Default for RetryConfig {
             max_retry_after: Duration::from_secs(30),
         }
     }
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+pub(crate) const MAX_BUFFERED_RESPONSE_BODY_BYTES: usize = 32 * 1024 * 1024;
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+pub(crate) trait TransportRequestBody: Sized {
+    fn is_empty(&self) -> bool;
+    fn is_replayable(&self) -> bool;
+    fn clone_for_retry(&self) -> Option<Self>;
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+pub(crate) struct RequestAttemptState<B> {
+    max_attempts: u32,
+    initial_body: Option<B>,
+    replayable_body: Option<B>,
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+impl<B> RequestAttemptState<B>
+where
+    B: TransportRequestBody,
+{
+    pub(crate) fn new(retry: RetryConfig, body: B) -> Self {
+        let max_attempts = if body.is_replayable() {
+            retry.max_attempts
+        } else {
+            1
+        };
+
+        Self {
+            max_attempts,
+            replayable_body: body.clone_for_retry(),
+            initial_body: Some(body),
+        }
+    }
+
+    pub(crate) fn max_attempts(&self) -> u32 {
+        self.max_attempts
+    }
+
+    pub(crate) fn next_body(&mut self) -> crate::error::Result<B> {
+        if let Some(body) = self.initial_body.take() {
+            return Ok(body);
+        }
+
+        self.replayable_body
+            .as_ref()
+            .and_then(TransportRequestBody::clone_for_retry)
+            .ok_or_else(|| crate::error::Error::transport("request body is not replayable", None))
+    }
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+pub(crate) fn ensure_method_accepts_body<B>(method: &Method, body: &B) -> crate::error::Result<()>
+where
+    B: TransportRequestBody,
+{
+    if matches!(*method, Method::GET | Method::HEAD | Method::DELETE) && !body.is_empty() {
+        return Err(crate::error::Error::invalid_config(
+            "this operation does not accept a request body",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+pub(crate) fn prepare_user_agent(
+    user_agent: Option<String>,
+) -> crate::error::Result<(String, http::HeaderValue)> {
+    let user_agent_text = user_agent.unwrap_or_else(default_user_agent);
+    let user_agent = http::HeaderValue::from_str(&user_agent_text)
+        .map_err(|_| crate::error::Error::invalid_config("invalid User-Agent header"))?;
+    Ok((user_agent_text, user_agent))
 }
 
 pub(crate) fn backoff_delay(config: RetryConfig, attempt: u32) -> Duration {
@@ -274,12 +343,12 @@ pub(crate) fn retry_after_from_headers(headers: &http::HeaderMap) -> Option<Dura
         .and_then(parse_retry_after_value)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 pub(crate) fn clamp_retry_after(config: RetryConfig, retry_after: Duration) -> Duration {
     retry_after.min(config.max_retry_after)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 pub(crate) fn retry_delay_from_response(
     config: RetryConfig,
     attempt: u32,
@@ -311,6 +380,64 @@ fn parse_retry_after_value(value: &str) -> Option<Duration> {
         Ok(delay) => Some(delay),
         Err(_) => Some(Duration::from_secs(0)),
     }
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+pub(crate) struct RequestTimer {
+    #[cfg(feature = "metrics")]
+    start: std::time::Instant,
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+impl RequestTimer {
+    pub(crate) fn start() -> Self {
+        Self {
+            #[cfg(feature = "metrics")]
+            start: std::time::Instant::now(),
+        }
+    }
+
+    pub(crate) fn finish(&self, method: &Method) {
+        #[cfg(feature = "metrics")]
+        metrics::histogram!(
+            "s3_http_request_duration_seconds",
+            "method" => method_label(method),
+        )
+        .record(self.start.elapsed().as_secs_f64());
+
+        #[cfg(not(feature = "metrics"))]
+        let _ = method;
+    }
+
+    pub(crate) fn finish_service_error(&self, method: &Method) {
+        #[cfg(feature = "metrics")]
+        {
+            metrics::counter!(
+                "s3_http_errors_total",
+                "method" => method_label(method),
+                "kind" => "service"
+            )
+            .increment(1);
+            self.finish(method);
+        }
+
+        #[cfg(not(feature = "metrics"))]
+        let _ = method;
+    }
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+pub(crate) fn record_service_retry(method: &Method) {
+    #[cfg(feature = "metrics")]
+    metrics::counter!(
+        "s3_http_retries_total",
+        "method" => method_label(method),
+        "reason" => "service"
+    )
+    .increment(1);
+
+    #[cfg(not(feature = "metrics"))]
+    let _ = method;
 }
 
 #[cfg(any(feature = "async", feature = "blocking"))]
@@ -382,6 +509,36 @@ pub(crate) fn response_service_error(
     }
 
     Some(response_error_from_status(status, headers, body))
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+pub(crate) enum ServiceErrorAction {
+    RetryAfter(Duration),
+    ReturnErr(crate::error::Error),
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+pub(crate) fn service_error_action(
+    retry: RetryConfig,
+    attempt: u32,
+    max_attempts: u32,
+    status: http::StatusCode,
+    headers: &http::HeaderMap,
+    body: &str,
+) -> Option<ServiceErrorAction> {
+    let err = response_service_error(status, headers, body)?;
+
+    if attempt < max_attempts && err.is_retryable() {
+        return Some(ServiceErrorAction::RetryAfter(retry_delay_from_response(
+            retry, attempt, status, headers,
+        )));
+    }
+
+    if status.is_success() {
+        return Some(ServiceErrorAction::ReturnErr(err));
+    }
+
+    None
 }
 
 #[cfg(any(feature = "async", feature = "blocking"))]
@@ -753,7 +910,7 @@ pub(crate) fn map_reqx_error(message: &str, err: reqx::Error) -> crate::error::E
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "async", feature = "blocking")))]
 pub(crate) fn followed_redirect(request_url: &Url, response_uri: &str) -> bool {
     if response_uri == request_url.as_str() {
         return false;
@@ -774,7 +931,7 @@ pub(crate) fn followed_redirect(request_url: &Url, response_uri: &str) -> bool {
         || request_url.query() != response_url.query()
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "async", feature = "blocking")))]
 pub(crate) fn unexpected_redirect_error(
     method: &Method,
     request_url: &Url,
@@ -788,7 +945,7 @@ pub(crate) fn unexpected_redirect_error(
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "async", feature = "blocking")))]
 fn redacted_response_uri_for_error(response_uri: &str) -> String {
     match Url::parse(response_uri) {
         Ok(url) => redacted_url_for_error(&url),
@@ -796,7 +953,7 @@ fn redacted_response_uri_for_error(response_uri: &str) -> String {
     }
 }
 
-#[cfg(any(test, feature = "async", feature = "blocking"))]
+#[cfg(any(feature = "async", feature = "blocking"))]
 pub(crate) fn redacted_url_for_error(url: &Url) -> String {
     let mut out = String::new();
     out.push_str(url.scheme());
@@ -827,7 +984,7 @@ pub(crate) fn redacted_request_context(method: &Method, url: &Url) -> String {
     format!("{method} {}", redacted_url_for_error(url))
 }
 
-#[cfg(any(test, feature = "tracing", feature = "async", feature = "blocking"))]
+#[cfg(any(feature = "tracing", feature = "async", feature = "blocking"))]
 pub(crate) fn redacted_path_for_trace(url: &Url) -> &'static str {
     if url.path() == "/" {
         "/"
@@ -847,6 +1004,9 @@ pub(crate) fn redacted_host_for_trace(_url: &Url) -> &'static str {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+
+    #[cfg(any(feature = "async", feature = "blocking"))]
+    use http::Method;
 
     use super::*;
 
@@ -881,6 +1041,13 @@ mod tests {
 
         assert_eq!(backoff_delay(cfg, 1), Duration::from_millis(0));
         assert_eq!(backoff_delay(cfg, 10), Duration::from_millis(0));
+    }
+
+    #[test]
+    fn retry_config_default_includes_retry_budget() {
+        let cfg = RetryConfig::default();
+        assert_eq!(cfg.max_attempts, 3);
+        assert_eq!(cfg.max_retry_after, Duration::from_secs(30));
     }
 
     #[test]
@@ -960,7 +1127,6 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "async", feature = "blocking"))]
     #[test]
     fn retry_after_from_headers_supports_http_date() {
         let mut headers = http::HeaderMap::new();
@@ -975,7 +1141,6 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "async", feature = "blocking"))]
     #[test]
     fn retry_after_from_headers_supports_seconds() {
         let mut headers = http::HeaderMap::new();
@@ -990,7 +1155,6 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "async", feature = "blocking"))]
     #[test]
     fn clamp_retry_after_respects_retry_policy_cap() {
         let config = RetryConfig {
@@ -1014,7 +1178,6 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "async", feature = "blocking"))]
     #[test]
     fn retry_delay_from_response_uses_retry_after_for_503() {
         let config = RetryConfig {

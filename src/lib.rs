@@ -61,6 +61,12 @@ compile_error!("Enable only one of: rustls, native-tls.");
 ))]
 compile_error!("Enable one of: rustls, native-tls.");
 
+#[cfg(all(
+    any(feature = "credentials-imds", feature = "credentials-sts"),
+    not(any(feature = "async", feature = "blocking"))
+))]
+compile_error!("Enable `async` or `blocking` when using `credentials-imds` or `credentials-sts`.");
+
 #[cfg(any(feature = "async", feature = "blocking"))]
 /// Service entry points and request builders.
 pub mod api;
@@ -71,14 +77,18 @@ pub mod providers;
 pub mod types;
 
 mod auth;
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 mod client;
 mod credentials;
 mod error;
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 mod transport;
 mod util;
 
+#[cfg(any(feature = "async", feature = "blocking"))]
+pub use auth::CachedProvider;
 pub use auth::{
-    AddressingStyle, Auth, CachedProvider, Credentials, CredentialsProvider, CredentialsSnapshot,
+    AddressingStyle, Auth, Credentials, CredentialsProvider, CredentialsSnapshot,
     CredentialsTlsRootStore, DynCredentialsProvider, Region,
 };
 #[cfg(feature = "async")]

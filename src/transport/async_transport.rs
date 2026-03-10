@@ -1,8 +1,5 @@
 use std::{io, pin::Pin, time::Duration};
 
-#[cfg(feature = "metrics")]
-use std::time::Instant;
-
 use bytes::Bytes;
 use futures_core::Stream;
 use http::header::{CONTENT_LENGTH, USER_AGENT};
@@ -12,17 +9,15 @@ use reqx::{
 };
 use url::Url;
 
-#[cfg(feature = "metrics")]
-use crate::transport::method_label;
 use crate::{
     error::{Error, Result},
     transport::{
-        RetryConfig, backoff_delay, default_tls_backend, default_user_agent, map_reqx_error,
-        reqx_backoff_source, reqx_retry_policy, response_error_from_status, response_service_error,
+        MAX_BUFFERED_RESPONSE_BODY_BYTES, RequestAttemptState, RequestTimer, RetryConfig,
+        ServiceErrorAction, TransportRequestBody, default_tls_backend, ensure_method_accepts_body,
+        map_reqx_error, prepare_user_agent, record_service_retry, reqx_backoff_source,
+        reqx_retry_policy, response_error_from_status, service_error_action,
     },
 };
-
-const MAX_BUFFERED_RESPONSE_BODY_BYTES: usize = 32 * 1024 * 1024;
 
 type AsyncByteStream =
     Pin<Box<dyn Stream<Item = std::result::Result<Bytes, io::Error>> + Send + Sync + 'static>>;
@@ -36,7 +31,11 @@ pub(crate) enum AsyncBody {
     },
 }
 
-impl AsyncBody {
+impl TransportRequestBody for AsyncBody {
+    fn is_empty(&self) -> bool {
+        matches!(self, Self::Empty)
+    }
+
     fn is_replayable(&self) -> bool {
         matches!(self, Self::Empty | Self::Bytes(_))
     }
@@ -96,9 +95,7 @@ impl AsyncTransport {
         timeout: Option<Duration>,
         tls_root_store: TlsRootStore,
     ) -> Result<Self> {
-        let user_agent_text = user_agent.unwrap_or_else(default_user_agent);
-        let user_agent = HeaderValue::from_str(&user_agent_text)
-            .map_err(|_| Error::invalid_config("invalid User-Agent header"))?;
+        let (user_agent_text, user_agent) = prepare_user_agent(user_agent)?;
 
         let mut builder = HttpClient::builder("http://localhost")
             .client_name(user_agent_text)
@@ -138,73 +135,40 @@ impl AsyncTransport {
         headers: HeaderMap,
         body: AsyncBody,
     ) -> Result<AsyncResponse> {
-        let max_attempts = if body.is_replayable() {
-            self.retry.max_attempts
-        } else {
-            1
-        };
-        let replayable_body = body.clone_for_retry();
-        let mut initial_body = Some(body);
-        #[cfg(feature = "metrics")]
-        let start = Instant::now();
+        let mut attempts = RequestAttemptState::new(self.retry, body);
+        let max_attempts = attempts.max_attempts();
+        let timer = RequestTimer::start();
 
         for attempt in 1..=max_attempts {
-            let current_body = if let Some(body) = initial_body.take() {
-                body
-            } else {
-                match replayable_body.as_ref() {
-                    Some(AsyncBody::Empty) => AsyncBody::Empty,
-                    Some(AsyncBody::Bytes(bytes)) => AsyncBody::Bytes(bytes.clone()),
-                    Some(AsyncBody::Stream { .. }) | None => {
-                        return Err(Error::transport("request body is not replayable", None));
-                    }
-                }
-            };
+            let current_body = attempts.next_body()?;
             let req = self.build_request(&method, url.clone(), headers.clone(), current_body)?;
             let resp = req
                 .send_response()
                 .await
                 .map_err(|err| map_reqx_error("request failed", err))?;
 
-            if let Some(err) =
-                response_service_error(resp.status(), resp.headers(), &resp.text_lossy())
-            {
-                if attempt < max_attempts && err.is_retryable() {
-                    #[cfg(feature = "metrics")]
-                    metrics::counter!(
-                        "s3_http_retries_total",
-                        "method" => method_label(&method),
-                        "reason" => "service"
-                    )
-                    .increment(1);
-                    tokio::time::sleep(backoff_delay(self.retry, attempt)).await;
-                    continue;
-                }
-                if resp.status().is_success() {
-                    #[cfg(feature = "metrics")]
-                    {
-                        metrics::counter!(
-                            "s3_http_errors_total",
-                            "method" => method_label(&method),
-                            "kind" => "service"
-                        )
-                        .increment(1);
-                        metrics::histogram!(
-                            "s3_http_request_duration_seconds",
-                            "method" => method_label(&method),
-                        )
-                        .record(start.elapsed().as_secs_f64());
+            if let Some(action) = service_error_action(
+                self.retry,
+                attempt,
+                max_attempts,
+                resp.status(),
+                resp.headers(),
+                &resp.text_lossy(),
+            ) {
+                match action {
+                    ServiceErrorAction::RetryAfter(delay) => {
+                        record_service_retry(&method);
+                        tokio::time::sleep(delay).await;
+                        continue;
                     }
-                    return Err(err);
+                    ServiceErrorAction::ReturnErr(err) => {
+                        timer.finish_service_error(&method);
+                        return Err(err);
+                    }
                 }
             }
 
-            #[cfg(feature = "metrics")]
-            metrics::histogram!(
-                "s3_http_request_duration_seconds",
-                "method" => method_label(&method),
-            )
-            .record(start.elapsed().as_secs_f64());
+            timer.finish(&method);
             return Ok(AsyncResponse::from_reqx(resp));
         }
 
@@ -231,9 +195,7 @@ impl AsyncTransport {
         headers: HeaderMap,
         body: AsyncBody,
     ) -> Result<reqx::RequestBuilder<'_>> {
-        if matches!(*method, Method::GET | Method::HEAD | Method::DELETE) {
-            ensure_empty_body(&body)?;
-        }
+        ensure_method_accepts_body(method, &body)?;
 
         let mut req = self
             .client
@@ -270,15 +232,6 @@ impl AsyncTransport {
 pub(crate) async fn response_error(resp: AsyncResponse) -> Error {
     let body_str = String::from_utf8_lossy(resp.body()).to_string();
     response_error_from_status(resp.status(), resp.headers(), &body_str)
-}
-
-fn ensure_empty_body(body: &AsyncBody) -> Result<()> {
-    match body {
-        AsyncBody::Empty => Ok(()),
-        AsyncBody::Bytes(_) | AsyncBody::Stream { .. } => Err(Error::invalid_config(
-            "this operation does not accept a request body",
-        )),
-    }
 }
 
 #[cfg(test)]

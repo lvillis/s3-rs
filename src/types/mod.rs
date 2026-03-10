@@ -1,13 +1,14 @@
 //! Shared request and response types.
 
 use http::{HeaderMap, Method};
-use serde::Deserialize;
 use url::Url;
 
+#[cfg(any(test, feature = "checksums", feature = "async", feature = "blocking"))]
 use crate::error::{Error, Result};
-
 #[cfg(any(feature = "async", feature = "blocking"))]
 use bytes::Bytes;
+#[cfg(any(test, feature = "async", feature = "blocking"))]
+use serde::Deserialize;
 #[cfg(feature = "async")]
 /// Streaming response body for async operations.
 pub type ByteStream =
@@ -754,6 +755,7 @@ pub struct PutBucketPublicAccessBlockOutput;
 #[derive(Debug)]
 pub struct DeleteBucketPublicAccessBlockOutput;
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlError {
     #[serde(rename = "Code")]
@@ -766,6 +768,7 @@ pub(crate) struct XmlError {
     pub(crate) host_id: Option<String>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlListBucketResult {
     #[serde(rename = "Name")]
@@ -790,6 +793,7 @@ pub(crate) struct XmlListBucketResult {
     pub(crate) common_prefixes: Vec<XmlCommonPrefixes>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlObject {
     #[serde(rename = "Key")]
@@ -804,12 +808,14 @@ pub(crate) struct XmlObject {
     pub(crate) storage_class: Option<String>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlCommonPrefixes {
     #[serde(rename = "Prefix")]
     pub(crate) prefix: String,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlDeleteResult {
     #[serde(rename = "Deleted", default)]
@@ -818,6 +824,7 @@ pub(crate) struct XmlDeleteResult {
     pub(crate) errors: Vec<XmlDeleteError>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlDeleted {
     #[serde(rename = "Key")]
@@ -830,6 +837,7 @@ pub(crate) struct XmlDeleted {
     pub(crate) delete_marker_version_id: Option<String>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlDeleteError {
     #[serde(rename = "Key")]
@@ -842,6 +850,7 @@ pub(crate) struct XmlDeleteError {
     pub(crate) message: Option<String>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlCopyObjectResult {
     #[serde(rename = "ETag")]
@@ -850,7 +859,10 @@ pub(crate) struct XmlCopyObjectResult {
     pub(crate) last_modified: Option<String>,
 }
 
-#[cfg(feature = "multipart")]
+#[cfg(all(
+    any(test, feature = "async", feature = "blocking"),
+    feature = "multipart"
+))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlInitiateMultipartUploadResult {
     #[serde(rename = "Bucket")]
@@ -861,7 +873,10 @@ pub(crate) struct XmlInitiateMultipartUploadResult {
     pub(crate) upload_id: String,
 }
 
-#[cfg(feature = "multipart")]
+#[cfg(all(
+    any(test, feature = "async", feature = "blocking"),
+    feature = "multipart"
+))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlCompleteMultipartUploadResult {
     #[serde(rename = "Location")]
@@ -874,7 +889,10 @@ pub(crate) struct XmlCompleteMultipartUploadResult {
     pub(crate) etag: Option<String>,
 }
 
-#[cfg(feature = "multipart")]
+#[cfg(all(
+    any(test, feature = "async", feature = "blocking"),
+    feature = "multipart"
+))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlListPartsResult {
     #[serde(rename = "Bucket")]
@@ -895,7 +913,10 @@ pub(crate) struct XmlListPartsResult {
     pub(crate) parts: Vec<XmlPart>,
 }
 
-#[cfg(feature = "multipart")]
+#[cfg(all(
+    any(test, feature = "async", feature = "blocking"),
+    feature = "multipart"
+))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlPart {
     #[serde(rename = "PartNumber")]
@@ -908,7 +929,10 @@ pub(crate) struct XmlPart {
     pub(crate) last_modified: Option<String>,
 }
 
-#[cfg(feature = "multipart")]
+#[cfg(all(
+    any(test, feature = "async", feature = "blocking"),
+    feature = "multipart"
+))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlCopyPartResult {
     #[serde(rename = "ETag")]
@@ -917,6 +941,7 @@ pub(crate) struct XmlCopyPartResult {
     pub(crate) last_modified: Option<String>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlListAllMyBucketsResult {
     #[serde(rename = "Owner")]
@@ -925,6 +950,7 @@ pub(crate) struct XmlListAllMyBucketsResult {
     pub(crate) buckets: Option<XmlBuckets>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlOwner {
     #[serde(rename = "ID")]
@@ -933,12 +959,14 @@ pub(crate) struct XmlOwner {
     pub(crate) display_name: Option<String>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlBuckets {
     #[serde(rename = "Bucket", default)]
     pub(crate) buckets: Vec<XmlBucket>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlBucket {
     #[serde(rename = "Name")]
@@ -947,6 +975,7 @@ pub(crate) struct XmlBucket {
     pub(crate) creation_date: Option<String>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlVersioningConfiguration {
     #[serde(rename = "Status")]
@@ -955,12 +984,14 @@ pub(crate) struct XmlVersioningConfiguration {
     pub(crate) mfa_delete: Option<String>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlLifecycleConfiguration {
     #[serde(rename = "Rule", default)]
     pub(crate) rules: Vec<XmlLifecycleRule>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlLifecycleRule {
     #[serde(rename = "ID")]
@@ -975,12 +1006,14 @@ pub(crate) struct XmlLifecycleRule {
     pub(crate) expiration: Option<XmlExpiration>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlLifecycleFilter {
     #[serde(rename = "Prefix")]
     pub(crate) prefix: Option<String>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlExpiration {
     #[serde(rename = "Days")]
@@ -989,12 +1022,14 @@ pub(crate) struct XmlExpiration {
     pub(crate) date: Option<String>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlCorsConfiguration {
     #[serde(rename = "CORSRule", default)]
     pub(crate) rules: Vec<XmlCorsRule>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlCorsRule {
     #[serde(rename = "ID")]
@@ -1011,18 +1046,21 @@ pub(crate) struct XmlCorsRule {
     pub(crate) max_age_seconds: Option<u32>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlTagging {
     #[serde(rename = "TagSet")]
     pub(crate) tag_set: Option<XmlTagSet>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlTagSet {
     #[serde(rename = "Tag", default)]
     pub(crate) tags: Vec<XmlTag>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlTag {
     #[serde(rename = "Key")]
@@ -1031,12 +1069,14 @@ pub(crate) struct XmlTag {
     pub(crate) value: String,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlServerSideEncryptionConfiguration {
     #[serde(rename = "Rule", default)]
     pub(crate) rules: Vec<XmlServerSideEncryptionRule>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlServerSideEncryptionRule {
     #[serde(rename = "ApplyServerSideEncryptionByDefault")]
@@ -1045,6 +1085,7 @@ pub(crate) struct XmlServerSideEncryptionRule {
     pub(crate) bucket_key_enabled: Option<bool>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlApplyServerSideEncryptionByDefault {
     #[serde(rename = "SSEAlgorithm")]
@@ -1053,6 +1094,7 @@ pub(crate) struct XmlApplyServerSideEncryptionByDefault {
     pub(crate) kms_master_key_id: Option<String>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct XmlPublicAccessBlockConfiguration {
     #[serde(rename = "BlockPublicAcls")]
@@ -1065,6 +1107,7 @@ pub(crate) struct XmlPublicAccessBlockConfiguration {
     pub(crate) restrict_public_buckets: Option<bool>,
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 impl TryFrom<XmlListBucketResult> for ListObjectsV2Output {
     type Error = Error;
 
@@ -1098,6 +1141,7 @@ impl TryFrom<XmlListBucketResult> for ListObjectsV2Output {
     }
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 impl From<XmlListAllMyBucketsResult> for ListBucketsOutput {
     fn from(value: XmlListAllMyBucketsResult) -> Self {
         let buckets = value
@@ -1123,6 +1167,7 @@ impl From<XmlListAllMyBucketsResult> for ListBucketsOutput {
     }
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 impl From<XmlDeleteResult> for DeleteObjectsOutput {
     fn from(value: XmlDeleteResult) -> Self {
         Self {
@@ -1150,6 +1195,7 @@ impl From<XmlDeleteResult> for DeleteObjectsOutput {
     }
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 impl From<XmlCopyObjectResult> for CopyObjectOutput {
     fn from(value: XmlCopyObjectResult) -> Self {
         Self {
@@ -1186,7 +1232,10 @@ mod checksum_tests {
     }
 }
 
-#[cfg(feature = "multipart")]
+#[cfg(all(
+    any(test, feature = "async", feature = "blocking"),
+    feature = "multipart"
+))]
 impl From<XmlInitiateMultipartUploadResult> for CreateMultipartUploadOutput {
     fn from(value: XmlInitiateMultipartUploadResult) -> Self {
         Self {
@@ -1197,7 +1246,10 @@ impl From<XmlInitiateMultipartUploadResult> for CreateMultipartUploadOutput {
     }
 }
 
-#[cfg(feature = "multipart")]
+#[cfg(all(
+    any(test, feature = "async", feature = "blocking"),
+    feature = "multipart"
+))]
 impl From<XmlCompleteMultipartUploadResult> for CompleteMultipartUploadOutput {
     fn from(value: XmlCompleteMultipartUploadResult) -> Self {
         Self {
@@ -1209,7 +1261,10 @@ impl From<XmlCompleteMultipartUploadResult> for CompleteMultipartUploadOutput {
     }
 }
 
-#[cfg(feature = "multipart")]
+#[cfg(all(
+    any(test, feature = "async", feature = "blocking"),
+    feature = "multipart"
+))]
 impl From<XmlListPartsResult> for ListPartsOutput {
     fn from(value: XmlListPartsResult) -> Self {
         Self {
@@ -1234,7 +1289,10 @@ impl From<XmlListPartsResult> for ListPartsOutput {
     }
 }
 
-#[cfg(feature = "multipart")]
+#[cfg(all(
+    any(test, feature = "async", feature = "blocking"),
+    feature = "multipart"
+))]
 impl From<XmlCopyPartResult> for UploadPartCopyOutput {
     fn from(value: XmlCopyPartResult) -> Self {
         Self {

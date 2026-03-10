@@ -893,6 +893,44 @@ mod tests {
     }
 
     #[test]
+    fn parses_list_objects_v2() {
+        let xml = r#"
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Name>bucket-a</Name>
+  <KeyCount>1</KeyCount>
+  <MaxKeys>1000</MaxKeys>
+  <IsTruncated>false</IsTruncated>
+  <Contents>
+    <Key>logs/app.txt</Key>
+    <ETag>"etag-1"</ETag>
+    <Size>7</Size>
+  </Contents>
+</ListBucketResult>
+"#;
+
+        let out = parse_list_objects_v2(xml).unwrap();
+        assert_eq!(out.name, "bucket-a");
+        assert_eq!(out.key_count, Some(1));
+        assert_eq!(out.contents.len(), 1);
+        assert_eq!(out.contents[0].key, "logs/app.txt");
+        assert_eq!(out.contents[0].etag.as_deref(), Some("\"etag-1\""));
+    }
+
+    #[test]
+    fn parses_bucket_versioning() {
+        let xml = r#"
+<VersioningConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Status>Enabled</Status>
+  <MfaDelete>Disabled</MfaDelete>
+</VersioningConfiguration>
+"#;
+
+        let cfg = parse_bucket_versioning(xml).unwrap();
+        assert_eq!(cfg.status, Some(types::BucketVersioningStatus::Enabled));
+        assert_eq!(cfg.mfa_delete, Some(types::BucketMfaDeleteStatus::Disabled));
+    }
+
+    #[test]
     fn parses_bucket_lifecycle() {
         let xml = r#"
 <LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
@@ -1083,6 +1121,15 @@ mod tests {
         assert!(xml.contains("xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\""));
         assert!(xml.contains("<Status>Enabled</Status>"));
         assert!(xml.contains("<MfaDelete>Disabled</MfaDelete>"));
+    }
+
+    #[test]
+    fn encodes_create_bucket_configuration() {
+        let xml = encode_create_bucket_configuration("eu-central-1").unwrap();
+        let xml = String::from_utf8_lossy(&xml).to_string();
+        assert!(xml.contains("<CreateBucketConfiguration"));
+        assert!(xml.contains("xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\""));
+        assert!(xml.contains("<LocationConstraint>eu-central-1</LocationConstraint>"));
     }
 
     #[test]

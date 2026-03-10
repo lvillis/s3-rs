@@ -1,5 +1,7 @@
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 use http::header::HeaderName;
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 use crate::error::Error;
 
 pub(crate) fn redact_value(value: &str) -> String {
@@ -27,6 +29,7 @@ pub(crate) fn redact_value(value: &str) -> String {
     format!("{head}...{tail}")
 }
 
+#[cfg(any(test, feature = "async", feature = "blocking"))]
 pub(crate) fn metadata_header_name(value: &str) -> Result<HeaderName, Error> {
     let value = value.trim();
     if value.is_empty() {

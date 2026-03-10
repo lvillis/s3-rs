@@ -36,3 +36,26 @@ pub(crate) fn copy_source_header_value(
         None => format!("/{bucket_enc}/{key_enc}"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_string_and_u64_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert("etag", "\"abc\"".parse().unwrap());
+        headers.insert("content-length", "42".parse().unwrap());
+
+        assert_eq!(header_string(&headers, "etag").as_deref(), Some("\"abc\""));
+        assert_eq!(header_u64(&headers, "content-length"), Some(42));
+    }
+
+    #[test]
+    fn copy_source_header_value_encodes_bucket_key_and_version() {
+        assert_eq!(
+            copy_source_header_value("bucket name", "dir/file name.txt", Some("v 1")),
+            "/bucket%20name/dir/file%20name.txt?versionId=v%201"
+        );
+    }
+}
