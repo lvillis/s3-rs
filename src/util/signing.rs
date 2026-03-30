@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use hmac::{Hmac, Mac as _};
+use hmac::{Hmac, KeyInit as _, Mac as _};
 use http::{HeaderMap, HeaderValue, Method};
 use sha2::Digest as _;
 use sha2::Sha256;
