@@ -87,7 +87,7 @@
 //! See the README and `examples/README.md` for a usage guide organized around auth, client
 //! builders, object and bucket services, TLS policy, and blocking variants.
 
-#![cfg_attr(docsrs, feature(doc_auto_cfg, doc_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(clippy::result_large_err)]
 
 #[cfg(all(
