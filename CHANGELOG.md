@@ -1,3 +1,8 @@
+## [0.1.24] - 2026-03-30
+
+### 🐛 Bug Fixes
+
+- *(docs)* Restore docs.rs build on nightly
 ## [0.1.23] - 2026-03-30
 
 ### 🐛 Bug Fixes
@@ -8,6 +13,7 @@
 ### ⚙️ Miscellaneous Tasks
 
 - Update justfile
+- Release s3 version 0.1.23
 ## [0.1.22] - 2026-03-10
 
 ### 🚜 Refactor
