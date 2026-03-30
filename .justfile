@@ -15,3 +15,7 @@ ci:
     cargo clippy --all-targets --all-features -- -D warnings
     cargo clippy --all-targets --no-default-features -- -D warnings
     cargo clippy --all-targets --no-default-features --features blocking,rustls -- -D warnings
+
+patch:
+    cargo release patch --no-publish --execute
+
