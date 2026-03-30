@@ -654,12 +654,14 @@ impl SanitizedReqxSource {
                 kind,
                 method,
                 uri,
+                message,
                 source,
+                ..
             } => Self::new(
                 reqx::ErrorCode::Transport,
                 Some(method),
                 Self::with_uri(uri),
-                Some(format!("kind={kind}")),
+                Some(format!("kind={kind}: {message}")),
                 Some(source),
             ),
             reqx::Error::Timeout {
@@ -1101,6 +1103,7 @@ mod tests {
             kind: reqx::TransportErrorKind::Connect,
             method: http::Method::GET,
             uri: "https://bucket.s3.example.com/private/object/key?token=secret".to_string(),
+            message: "connect failed".to_string(),
             source: Box::new(std::io::Error::other("connect failed")),
         };
 
