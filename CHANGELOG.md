@@ -1,3 +1,13 @@
+## [0.1.23] - 2026-03-30
+
+### 🐛 Bug Fixes
+
+- *(transport)* Support reqx 0.1.29 transport errors
+- *(transport)* Support reqx transport errors
+
+### ⚙️ Miscellaneous Tasks
+
+- Update justfile
 ## [0.1.22] - 2026-03-10
 
 ### 🚜 Refactor
@@ -8,6 +18,10 @@
 ### 📚 Documentation
 
 - Improve docs.rs experience and enforce doc quality
+
+### ⚙️ Miscellaneous Tasks
+
+- Release s3 version 0.1.22
 ## [0.1.21] - 2026-03-06
 
 ### ⚙️ Miscellaneous Tasks
