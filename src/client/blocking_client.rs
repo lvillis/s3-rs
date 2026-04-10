@@ -380,17 +380,29 @@ mod tests {
 
     #[cfg(all(feature = "native-tls", not(feature = "rustls")))]
     #[test]
-    fn build_accepts_webpki_on_native_tls() {
-        // reqx blocking transport (ureq backend) accepts WebPki roots on native-tls.
-        let client = BlockingClient::builder("https://s3.example.com")
+    fn build_rejects_webpki_on_native_tls() {
+        let err = match BlockingClient::builder("https://s3.example.com")
             .expect("builder should parse")
             .region("us-east-1")
             .auth(Auth::Anonymous)
             .tls_root_store(BlockingTlsRootStore::WebPki)
-            .build();
-        assert!(
-            client.is_ok(),
-            "native-tls should build with WebPki root store"
-        );
+            .build()
+        {
+            Ok(_) => panic!("native-tls should reject WebPki root store"),
+            Err(err) => err,
+        };
+
+        match err {
+            Error::Transport {
+                source: Some(source),
+                ..
+            } => {
+                assert!(
+                    source.to_string().contains("TlsRootStore::WebPki"),
+                    "unexpected source error: {source}"
+                );
+            }
+            other => panic!("expected transport error, got {other:?}"),
+        }
     }
 }

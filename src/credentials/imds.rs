@@ -547,7 +547,11 @@ mod tests {
         Ok((addr, handle))
     }
 
-    #[cfg(all(feature = "async", feature = "native-tls", not(feature = "rustls")))]
+    #[cfg(all(
+        any(feature = "async", feature = "blocking"),
+        feature = "native-tls",
+        not(feature = "rustls")
+    ))]
     fn assert_native_tls_webpki_error(err: Error) {
         match err {
             Error::Transport {
@@ -807,12 +811,11 @@ mod tests {
 
     #[cfg(all(feature = "blocking", feature = "native-tls", not(feature = "rustls")))]
     #[test]
-    fn metadata_blocking_client_accepts_webpki_on_native_tls() {
-        // reqx blocking transport (ureq backend) accepts WebPki roots on native-tls.
-        let client = metadata_blocking_client(Duration::from_secs(1), TlsRootStore::WebPki);
-        assert!(
-            client.is_ok(),
-            "native-tls should build with WebPki root store"
-        );
+    fn metadata_blocking_client_rejects_webpki_on_native_tls() {
+        let err = match metadata_blocking_client(Duration::from_secs(1), TlsRootStore::WebPki) {
+            Ok(_) => panic!("native-tls should reject WebPki root store"),
+            Err(err) => err,
+        };
+        assert_native_tls_webpki_error(err);
     }
 }
