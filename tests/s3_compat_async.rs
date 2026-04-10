@@ -742,7 +742,9 @@ async fn s3_compat_async_copy_object_roundtrip() -> Result<(), Error> {
                 .await?;
 
             let head = client.objects().head(&bucket, dst).send().await?;
-            assert_eq!(head.content_type.as_deref(), Some("text/plain"));
+            if common::strict() {
+                assert_eq!(head.content_type.as_deref(), Some("text/plain"));
+            }
 
             let got = client
                 .objects()
