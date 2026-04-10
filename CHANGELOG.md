@@ -3,6 +3,10 @@
 ### 🐛 Bug Fixes
 
 - *(docs)* Restore docs.rs build on nightly
+
+### ⚙️ Miscellaneous Tasks
+
+- Release s3 version 0.1.24
 ## [0.1.23] - 2026-03-30
 
 ### 🐛 Bug Fixes
