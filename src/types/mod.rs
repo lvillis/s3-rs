@@ -264,10 +264,10 @@ impl Checksum {
                 base64::engine::general_purpose::STANDARD.encode(digest)
             }
             ChecksumAlgorithm::Sha256 => {
-                use sha2::Digest as _;
+                use graviola::hashing::{Hash as _, Sha256};
 
-                let digest = sha2::Sha256::digest(bytes);
-                base64::engine::general_purpose::STANDARD.encode(digest)
+                let digest = Sha256::hash(bytes);
+                base64::engine::general_purpose::STANDARD.encode(digest.as_ref())
             }
         };
 

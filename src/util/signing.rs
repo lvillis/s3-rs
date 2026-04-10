@@ -1,8 +1,6 @@
 use bytes::Bytes;
-use hmac::{Hmac, KeyInit as _, Mac as _};
+use graviola::hashing::{Hash as _, Sha256, hmac::Hmac};
 use http::{HeaderMap, HeaderValue, Method};
-use sha2::Digest as _;
-use sha2::Sha256;
 use time::OffsetDateTime;
 
 use crate::{
@@ -50,10 +48,7 @@ impl<'a> SigV4Params<'a> {
 }
 
 pub(crate) fn payload_hash_bytes(body: &Bytes) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(body);
-    let digest = hasher.finalize();
-    hex::encode(digest)
+    hex::encode(Sha256::hash(body.as_ref()).as_ref())
 }
 
 pub(crate) fn payload_hash_empty() -> String {
@@ -384,16 +379,13 @@ fn signature(
 }
 
 fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, Error> {
-    let mut mac =
-        HmacSha256::new_from_slice(key).map_err(|_| Error::signing("invalid HMAC key"))?;
+    let mut mac = HmacSha256::new(key);
     mac.update(data);
-    Ok(mac.finalize().into_bytes().to_vec())
+    Ok(mac.finish().as_ref().to_vec())
 }
 
 fn sha256_hex(data: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    hex::encode(hasher.finalize())
+    hex::encode(Sha256::hash(data).as_ref())
 }
 
 fn date_stamp(now: OffsetDateTime) -> String {
