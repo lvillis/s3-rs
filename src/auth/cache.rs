@@ -1,3 +1,5 @@
+#[cfg(any(feature = "async", feature = "blocking"))]
+use std::cfg_select;
 #[cfg(all(feature = "blocking", not(feature = "async")))]
 use std::sync::{Condvar, Mutex};
 #[cfg(any(feature = "async", feature = "blocking"))]
@@ -31,10 +33,15 @@ enum RefreshDecision {
     },
 }
 
-#[cfg(feature = "async")]
-type CachedStateLock = tokio::sync::Mutex<CachedState>;
-#[cfg(all(not(feature = "async"), feature = "blocking"))]
-type CachedStateLock = Mutex<CachedState>;
+#[cfg(any(feature = "async", feature = "blocking"))]
+cfg_select! {
+    feature = "async" => {
+        type CachedStateLock = tokio::sync::Mutex<CachedState>;
+    }
+    _ => {
+        type CachedStateLock = Mutex<CachedState>;
+    }
+}
 
 #[cfg(feature = "blocking")]
 enum BlockingRefreshWait {
@@ -235,19 +242,19 @@ where
         refreshed: Result<CredentialsSnapshot>,
     ) -> Result<CredentialsSnapshot> {
         state.refreshing = false;
+        let fallback_now = OffsetDateTime::now_utc();
 
         match refreshed {
             Ok(snapshot) => {
                 state.cached = Some(snapshot.clone());
                 Ok(snapshot)
             }
-            Err(err) => {
-                let fallback_now = OffsetDateTime::now_utc();
-                if let Some(snapshot) = fallback.filter(|s| !Self::is_expired(s, fallback_now)) {
-                    return Ok(snapshot);
-                }
-                Err(err)
+            Err(_)
+                if let Some(snapshot) = fallback.filter(|s| !Self::is_expired(s, fallback_now)) =>
+            {
+                Ok(snapshot)
             }
+            Err(err) => Err(err),
         }
     }
 
@@ -262,49 +269,49 @@ where
         self.condvar.notify_all();
     }
 
-    #[cfg(all(feature = "blocking", not(feature = "async")))]
+    #[cfg(feature = "blocking")]
     fn with_blocking_state<R>(&self, f: impl FnOnce(&mut CachedState) -> R) -> R {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        f(&mut state)
-    }
-
-    #[cfg(all(feature = "blocking", feature = "async"))]
-    fn with_blocking_state<R>(&self, f: impl FnOnce(&mut CachedState) -> R) -> R {
-        let mut state = self.state.blocking_lock();
-        f(&mut state)
-    }
-
-    #[cfg(all(feature = "blocking", not(feature = "async")))]
-    fn current_blocking_refresh_wait(&self) -> BlockingRefreshWait {
-        BlockingRefreshWait::Condvar
-    }
-
-    #[cfg(all(feature = "blocking", feature = "async"))]
-    fn current_blocking_refresh_wait(&self) -> BlockingRefreshWait {
-        BlockingRefreshWait::Epoch(self.observed_refresh_epoch())
-    }
-
-    #[cfg(all(feature = "blocking", not(feature = "async")))]
-    fn wait_for_blocking_refresh(&self, _wait: BlockingRefreshWait) {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        while state.refreshing {
-            state = self
-                .condvar
-                .wait(state)
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cfg_select! {
+            all(feature = "blocking", not(feature = "async")) => {
+                let mut state = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                f(&mut state)
+            }
+            _ => {
+                let mut state = self.state.blocking_lock();
+                f(&mut state)
+            }
         }
     }
 
-    #[cfg(all(feature = "blocking", feature = "async"))]
+    #[cfg(feature = "blocking")]
+    fn current_blocking_refresh_wait(&self) -> BlockingRefreshWait {
+        cfg_select! {
+            all(feature = "blocking", not(feature = "async")) => BlockingRefreshWait::Condvar,
+            _ => BlockingRefreshWait::Epoch(self.observed_refresh_epoch()),
+        }
+    }
+
+    #[cfg(feature = "blocking")]
     fn wait_for_blocking_refresh(&self, wait: BlockingRefreshWait) {
-        match wait {
-            BlockingRefreshWait::Epoch(observed_epoch) => {
+        cfg_select! {
+            all(feature = "blocking", not(feature = "async")) => {
+                let _ = wait;
+                let mut state = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                while state.refreshing {
+                    state = self
+                        .condvar
+                        .wait(state)
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                }
+            }
+            _ => {
+                let BlockingRefreshWait::Epoch(observed_epoch) = wait;
                 self.wait_for_refresh_epoch_change(observed_epoch);
             }
         }
