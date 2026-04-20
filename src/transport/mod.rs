@@ -1,3 +1,5 @@
+#[cfg(any(feature = "async", feature = "blocking"))]
+use std::cfg_select;
 use std::{
     sync::{
         OnceLock,
@@ -127,6 +129,14 @@ pub(crate) fn prepare_user_agent(
     Ok((user_agent_text, user_agent))
 }
 
+#[cfg(any(feature = "async", feature = "blocking"))]
+pub(crate) fn content_length_header_value(
+    content_length: u64,
+) -> crate::error::Result<http::HeaderValue> {
+    http::HeaderValue::from_str(&content_length.to_string())
+        .map_err(|_| crate::error::Error::invalid_config("invalid Content-Length header"))
+}
+
 pub(crate) fn backoff_delay(config: RetryConfig, attempt: u32) -> Duration {
     let attempt = attempt.saturating_sub(1);
     let factor = 1u32 << attempt.min(16);
@@ -175,16 +185,11 @@ pub(crate) fn reqx_retry_policy(config: RetryConfig) -> RetryPolicy {
 
 #[cfg(any(feature = "async", feature = "blocking"))]
 pub(crate) fn default_tls_backend() -> TlsBackend {
-    #[cfg(feature = "rustls")]
-    {
-        return TlsBackend::RustlsRing;
+    cfg_select! {
+        feature = "rustls" => TlsBackend::RustlsRing,
+        feature = "native-tls" => TlsBackend::NativeTls,
+        _ => TlsBackend::RustlsRing,
     }
-    #[cfg(all(not(feature = "rustls"), feature = "native-tls"))]
-    {
-        return TlsBackend::NativeTls;
-    }
-    #[allow(unreachable_code)]
-    TlsBackend::RustlsRing
 }
 
 #[cfg(any(feature = "async", feature = "blocking"))]
@@ -305,6 +310,10 @@ fn jitter_millis(max_millis: u128) -> u128 {
     u128::from(next_jitter_u64()) % max_millis
 }
 
+fn advance_jitter_state(state: u64) -> u64 {
+    state.wrapping_mul(6364136223846793005).wrapping_add(1)
+}
+
 fn next_jitter_u64() -> u64 {
     static JITTER_STATE: OnceLock<AtomicU64> = OnceLock::new();
     let state = JITTER_STATE.get_or_init(|| {
@@ -316,14 +325,8 @@ fn next_jitter_u64() -> u64 {
         AtomicU64::new(seed.max(1))
     });
 
-    let mut current = state.load(Ordering::Relaxed);
-    loop {
-        let next = current.wrapping_mul(6364136223846793005).wrapping_add(1);
-        match state.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {
-            Ok(_) => return next,
-            Err(observed) => current = observed,
-        }
-    }
+    let previous = state.update(Ordering::Relaxed, Ordering::Relaxed, advance_jitter_state);
+    advance_jitter_state(previous)
 }
 
 #[cfg(any(feature = "async", feature = "blocking"))]
@@ -446,50 +449,57 @@ pub(crate) fn response_error_from_status(
     headers: &http::HeaderMap,
     body: &str,
 ) -> crate::error::Error {
+    response_error_from_parts(
+        status,
+        headers,
+        crate::util::xml::parse_error_xml(body),
+        body,
+    )
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn response_error_from_parts(
+    status: http::StatusCode,
+    headers: &http::HeaderMap,
+    parsed: Option<crate::types::xml::XmlError>,
+    body: &str,
+) -> crate::error::Error {
     let request_id = request_id_from_headers(headers);
-    let parsed = crate::util::xml::parse_error_xml(body);
     let snippet = crate::util::text::truncate_snippet(body, 4096);
 
-    if status == http::StatusCode::TOO_MANY_REQUESTS {
-        if let Some(parsed) = parsed {
-            return crate::error::Error::RateLimited {
-                retry_after: retry_after_from_headers(headers),
-                request_id: parsed.request_id.or(request_id),
-                code: parsed.code,
-                message: parsed.message,
-                host_id: parsed.host_id,
-                body_snippet: Some(snippet),
-            };
-        }
-
-        return crate::error::Error::RateLimited {
+    match (status, parsed) {
+        (http::StatusCode::TOO_MANY_REQUESTS, Some(parsed)) => crate::error::Error::RateLimited {
+            retry_after: retry_after_from_headers(headers),
+            request_id: parsed.request_id.or(request_id),
+            code: parsed.code,
+            message: parsed.message,
+            host_id: parsed.host_id,
+            body_snippet: Some(snippet),
+        },
+        (http::StatusCode::TOO_MANY_REQUESTS, None) => crate::error::Error::RateLimited {
             retry_after: retry_after_from_headers(headers),
             request_id,
             code: None,
             message: None,
             host_id: None,
             body_snippet: Some(snippet),
-        };
-    }
-
-    if let Some(parsed) = parsed {
-        return crate::error::Error::Api {
+        },
+        (status, Some(parsed)) => crate::error::Error::Api {
             status,
             code: parsed.code,
             message: parsed.message,
             request_id: parsed.request_id.or(request_id),
             host_id: parsed.host_id,
             body_snippet: Some(snippet),
-        };
-    }
-
-    crate::error::Error::Api {
-        status,
-        code: None,
-        message: None,
-        request_id,
-        host_id: None,
-        body_snippet: Some(snippet),
+        },
+        (status, None) => crate::error::Error::Api {
+            status,
+            code: None,
+            message: None,
+            request_id,
+            host_id: None,
+            body_snippet: Some(snippet),
+        },
     }
 }
 
@@ -499,16 +509,8 @@ pub(crate) fn response_service_error(
     headers: &http::HeaderMap,
     body: &str,
 ) -> Option<crate::error::Error> {
-    let parsed = crate::util::xml::parse_error_xml(body)?;
-    if parsed.code.is_none()
-        && parsed.message.is_none()
-        && parsed.request_id.is_none()
-        && parsed.host_id.is_none()
-    {
-        return None;
-    }
-
-    Some(response_error_from_status(status, headers, body))
+    crate::util::xml::parse_error_xml(body)
+        .map(|parsed| response_error_from_parts(status, headers, Some(parsed), body))
 }
 
 #[cfg(any(feature = "async", feature = "blocking"))]

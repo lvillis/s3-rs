@@ -11,9 +11,9 @@ use crate::{
     error::{Error, Result},
     transport::{
         MAX_BUFFERED_RESPONSE_BODY_BYTES, RequestAttemptState, RequestTimer, RetryConfig,
-        ServiceErrorAction, TransportRequestBody, default_tls_backend, ensure_method_accepts_body,
-        map_reqx_error, prepare_user_agent, record_service_retry, reqx_backoff_source,
-        reqx_retry_policy, response_error_from_status, service_error_action,
+        ServiceErrorAction, TransportRequestBody, content_length_header_value, default_tls_backend,
+        ensure_method_accepts_body, map_reqx_error, prepare_user_agent, record_service_retry,
+        reqx_backoff_source, reqx_retry_policy, response_error_from_status, service_error_action,
     },
 };
 
@@ -212,16 +212,17 @@ impl BlockingTransport {
             BlockingBody::Bytes(b) => req.body(b),
             BlockingBody::Reader {
                 reader,
-                content_length,
-            } => {
-                let mut req = req.body_reader(reader);
-                if let Some(len) = content_length {
-                    let value = HeaderValue::from_str(&len.to_string())
-                        .map_err(|_| Error::invalid_config("invalid Content-Length header"))?;
-                    req = req.header(http::header::CONTENT_LENGTH, value);
-                }
-                req
-            }
+                content_length: Some(len),
+            } => req
+                .header(
+                    http::header::CONTENT_LENGTH,
+                    content_length_header_value(len)?,
+                )
+                .body_reader(reader),
+            BlockingBody::Reader {
+                reader,
+                content_length: None,
+            } => req.body_reader(reader),
         };
 
         Ok(req)

@@ -106,12 +106,8 @@ fn parse_ini(contents: &str) -> HashMap<String, HashMap<String, String>> {
             continue;
         };
 
-        let (k, v) = match line.split_once('=') {
-            Some(pair) => pair,
-            None => match line.split_once(':') {
-                Some(pair) => pair,
-                None => continue,
-            },
+        let Some((k, v)) = line.split_once('=').or_else(|| line.split_once(':')) else {
+            continue;
         };
 
         let key = k.trim().to_ascii_lowercase();
