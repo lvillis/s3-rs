@@ -1,8 +1,18 @@
+## [0.1.28] - 2026-04-20
+
+### 🚜 Refactor
+
+- *(transport)* Reuse parsed service errors
+- *(auth)* Simplify cache and profile control flow
 ## [0.1.27] - 2026-04-10
 
 ### 🧪 Testing
 
 - Expect webpki rejection with blocking native-tls
+
+### ⚙️ Miscellaneous Tasks
+
+- Release s3 version 0.1.27
 ## [0.1.26] - 2026-04-10
 
 ### 🧪 Testing
